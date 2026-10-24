@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-mod consensus;
 mod fingerprint;
 mod ingest;
 mod inspect;

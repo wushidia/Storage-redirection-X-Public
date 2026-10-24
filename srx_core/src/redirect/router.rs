@@ -1,18 +1,19 @@
 // 路径路由器：重定向决策核心，处理映射、允许列表、排除列表
+mod matching;
+mod perf;
+
 use crate::domain::PathMapping;
 use crate::platform::{self, paths};
+use matching::{
+    generate_redirected_path, is_allowed_real_path, is_blacklisted_path, is_excluded_real_path,
+    map_path_to_target,
+};
 use once_cell::sync::Lazy;
+use perf::{log_router_perf, should_log_step};
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-const ROUTER_SLOW_MS: i64 = 5;
 const REDIRECT_LOG_STEP: u64 = 4096;
-
-// 首次与每 step 次命中才打样本，避免热路径刷满 running.log
-#[inline]
-fn should_log_step(count: u64, step: u64) -> bool {
-    count == 1 || count.is_multiple_of(step)
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RedirectAction {
@@ -434,124 +435,3 @@ impl PathRouter {
 }
 
 static PATH_ROUTER: Lazy<PathRouter> = Lazy::new(PathRouter::new);
-
-// 路径是否属于系统保护目录（不参与重定向）
-fn is_blacklisted_path(path: &str) -> bool {
-    const BLACKLIST: [&str; 11] = [
-        "/system/",
-        "/data/app/",
-        "/data/misc/",
-        "/proc/",
-        "/dev/",
-        "/sys/",
-        "/apex/",
-        "/vendor/",
-        "/product/",
-        "/odm/",
-        "/cache/",
-    ];
-    BLACKLIST
-        .iter()
-        .any(|prefix| paths::starts_with(path, prefix))
-}
-
-fn is_excluded_real_path(excluded_paths: &[String], path: &str, storage_root: &str) -> bool {
-    if storage_root.is_empty() {
-        return false;
-    }
-
-    for excluded in excluded_paths {
-        if paths::matches(excluded, path, true) {
-            return true;
-        }
-    }
-    false
-}
-
-fn is_allowed_real_path(allowed_paths: &[String], path: &str, storage_root: &str) -> bool {
-    if storage_root.is_empty() {
-        return false;
-    }
-
-    for allowed in allowed_paths {
-        if paths::matches(allowed, path, true) {
-            return true;
-        }
-    }
-    false
-}
-
-fn map_path_to_target(mappings: &[PathMapping], path: &str) -> Option<String> {
-    for mapping in mappings {
-        if path == mapping.request_path {
-            return Some(mapping.final_path.clone());
-        }
-        let prefix = format!("{}/", mapping.request_path);
-        if paths::starts_with(path, &prefix) {
-            let suffix = &path[mapping.request_path.len()..];
-            return Some(format!("{}{}", mapping.final_path, suffix));
-        }
-    }
-    None
-}
-
-#[allow(clippy::too_many_arguments)]
-fn log_router_perf(
-    exit_reason: &str,
-    original_path: &str,
-    normalized_path: &str,
-    resolved_path: &str,
-    map_count: usize,
-    allow_count: usize,
-    excl_count: usize,
-    normalize_ms: i64,
-    lock_ms: i64,
-    map_ms: i64,
-    allow_ms: i64,
-    started_ms: i64,
-    decision: &RedirectDecision,
-) {
-    let total_ms = paths::monotonic_ms().saturating_sub(started_ms);
-    if total_ms < ROUTER_SLOW_MS {
-        return;
-    }
-    log::info!(
-        "perf router exit={} action={} map={} allow={} excl={} path={} normalized={} resolved={} to={} normalize_ms={} lock_ms={} map_ms={} allow_ms={} total_ms={}",
-        exit_reason,
-        if decision.is_redirect() {
-            "redirect"
-        } else {
-            "allow"
-        },
-        map_count,
-        allow_count,
-        excl_count,
-        original_path,
-        normalized_path,
-        resolved_path,
-        decision.new_path,
-        normalize_ms,
-        lock_ms,
-        map_ms,
-        allow_ms,
-        total_ms
-    );
-}
-
-fn generate_redirected_path(storage_root: &str, redirect_target: &str, path: &str) -> String {
-    if redirect_target.is_empty() || storage_root.is_empty() {
-        return path.to_string();
-    }
-
-    if path == storage_root {
-        return redirect_target.to_string();
-    }
-
-    let prefix = format!("{}/", storage_root);
-    if !paths::starts_with(path, &prefix) {
-        return path.to_string();
-    }
-
-    let relative = &path[prefix.len()..];
-    paths::join(redirect_target, relative)
-}

@@ -504,8 +504,9 @@ final class FilteringCursor extends AbstractCursor {
   }
 
   private int currentBaseRow() {
-    if (mPos < 0 || mPos >= rows.length)
+    int position = getPosition();
+    if (position < 0 || position >= rows.length)
       return -1;
-    return rows[mPos];
+    return rows[position];
   }
 }

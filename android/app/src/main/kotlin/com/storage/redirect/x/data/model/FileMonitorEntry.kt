@@ -4,6 +4,7 @@ package com.storage.redirect.x.data.model
 // 原生侧日志格式（`|` 分隔，共 7~8 字段）：
 // 时间戳|包名|调用方|操作类型|路径|ret=返回值|errno=错误码[|额外信息]
 // 包名/调用方格式：单包名 或 pkg1,pkg2,pkg3（共享 UID 进程）
+@androidx.compose.runtime.Immutable
 data class FileMonitorEntry(
     val timestamp: String,
     val packageName: String,
@@ -14,7 +15,16 @@ data class FileMonitorEntry(
     val errorNo: Int? = null,
     val extra: String? = null,
     // 共享 UID 场景下，指定当前条目对应的具体包名
-    val resolvedPackage: String? = null
+    val resolvedPackage: String? = null,
+    val sequence: Long = 0,
+    val timeMillis: Long = 0,
+    val lastTimeMillis: Long = timeMillis,
+    val count: Long = 1,
+    val bytes: Long = 0,
+    val nativeResult: Long? = resultCode?.toLong(),
+    val lostRecords: Long = 0,
+    val processId: Int = 0,
+    val userId: Int = 0,
 ) {
     // 保留 /storage/emulated/<user_id>/ 前缀以显式标注用户
     val displayPath: String
@@ -34,23 +44,28 @@ data class FileMonitorEntry(
 
     // 解析共享 UID 中的所有包名（优先从 packageName 解析）
     val sharedUidPackages: List<String>
-        get() = when {
-            isSharedUidPackage -> packageName.split(",").filter { it.isNotBlank() }
-            isSharedUidCaller -> caller.split(",").filter { it.isNotBlank() }
-            else -> emptyList()
-        }
+        get() =
+            when {
+                isSharedUidPackage -> packageName.split(",").filter { it.isNotBlank() }
+                isSharedUidCaller -> caller.split(",").filter { it.isNotBlank() }
+                else -> emptyList()
+            }
 
     // 有效的包名（优先使用 resolvedPackage）
     private val effectivePackage: String
-        get() = resolvedPackage ?: if (isSharedUidPackage) sharedUidPackages.firstOrNull() ?: packageName else packageName
+        get() =
+            resolvedPackage
+                ?: if (isSharedUidPackage) sharedUidPackages.firstOrNull() ?: packageName
+                else packageName
 
     // 有效的调用方（用于判断代写场景）
     private val effectiveCaller: String
         get() = if (isSharedUidCaller) sharedUidPackages.firstOrNull() ?: caller else caller
 
-    private val extraFields: Map<String, String> by lazy(LazyThreadSafetyMode.NONE) {
-        parseExtraFields(extra)
-    }
+    private val extraFields: Map<String, String> by
+        lazy(LazyThreadSafetyMode.NONE) {
+            parseExtraFields(extra)
+        }
 
     private val identifyMethod: String
         get() = parseExtraField("identify_method").orEmpty()
@@ -58,15 +73,25 @@ data class FileMonitorEntry(
     private val identifyReliability: String
         get() = parseExtraField("identify_reliability").orEmpty()
 
-    private val subjectResolution: SubjectResolution by lazy(LazyThreadSafetyMode.NONE) {
-        resolveSubjectResolution()
-    }
+    private val subjectResolution: SubjectResolution by
+        lazy(LazyThreadSafetyMode.NONE) {
+            resolveSubjectResolution()
+        }
 
     val isDelegatedBySystemWriter: Boolean
         get() = subjectResolution.isDelegated
 
     val subjectPackage: String
         get() = subjectResolution.packageName
+
+    // Keep a shared actor intact; choosing the first package would misattribute file operations.
+    val actorIdentity: String
+        get() = when {
+            identifyReliability == "high" && caller.isNotBlank() && caller != "-" -> caller
+            isSharedUidCaller -> caller
+            isSharedUidPackage -> packageName
+            else -> subjectPackage
+        }
 
     val delegatedWriterType: MonitorWriterType
         get() {
@@ -95,7 +120,7 @@ data class FileMonitorEntry(
         }
 
     val isSuccess: Boolean
-        get() = (resultCode ?: -1) >= 0
+        get() = (nativeResult ?: -1) >= 0
 
     val resultState: MonitorResultState
         get() = if (isSuccess) MonitorResultState.SUCCESS else MonitorResultState.FAILED
@@ -128,8 +153,12 @@ data class FileMonitorEntry(
                 return MonitorActionType.CREATE
             }
 
-            if (opType.equals("WRITE", ignoreCase = true)) {
-                return MonitorActionType.OPEN
+            when (opType.uppercase()) {
+                "READ" -> return MonitorActionType.READ
+                "WRITE" -> return MonitorActionType.WRITE
+                "TRUNCATE" -> return MonitorActionType.TRUNCATE
+                "MMAP" -> return MonitorActionType.MAP
+                "SYNC" -> return MonitorActionType.SYNC
             }
             return MonitorActionType.OPEN
         }
@@ -163,7 +192,7 @@ data class FileMonitorEntry(
         if (actualCaller.equals(actualPackage, ignoreCase = true)) {
             return false
         }
-        return identifyMethod != "unknown" || identifyReliability != "none"
+        return identifyReliability == "high"
     }
 
     private fun parseExtraField(key: String): String? {
@@ -228,6 +257,11 @@ data class FileMonitorEntry(
     }
 
     companion object {
+        private val MONITOR_TIME_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern(
+                "yyyy-MM-dd HH:mm:ss.SSS",
+                java.util.Locale.ROOT,
+            )
         private const val MIN_FIELD_COUNT = 7
         private const val O_CREAT_FLAG = 0x40L
         private const val O_TMPFILE_MASK = 0x410000L
@@ -238,8 +272,43 @@ data class FileMonitorEntry(
         private val GENERIC_PACKAGE_SEGMENT_REGEX =
             Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+){2,}$")
 
+        private fun parseJson(line: String): FileMonitorEntry = runCatching {
+            val json = com.google.gson.JsonParser.parseString(line).asJsonObject
+            fun text(key: String) = json.get(key)?.takeUnless { it.isJsonNull }?.asString.orEmpty()
+            fun number(key: String) = json.get(key)?.takeUnless { it.isJsonNull }?.asLong ?: 0L
+            val time = number("time_ms")
+            val result = number("result")
+            FileMonitorEntry(
+                timestamp =
+                    MONITOR_TIME_FORMAT.format(
+                        java.time.Instant.ofEpochMilli(time)
+                            .atZone(java.time.ZoneId.systemDefault())
+                    ),
+                packageName = text("process"),
+                caller = text("caller"),
+                opType = text("operation"),
+                path = text("path"),
+                resultCode =
+                    result.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(),
+                nativeResult = result,
+                errorNo = number("errno").toInt(),
+                extra =
+                    "identify_method=${text("method")}|identify_reliability=${text("confidence")}|${text("extra")}",
+                sequence = number("sequence"),
+                timeMillis = time,
+                bytes =
+                    if (text("operation") in listOf("READ", "WRITE")) result.coerceAtLeast(0)
+                    else 0,
+                lostRecords = number("lost"),
+                processId = number("pid").toInt(),
+                userId = number("uid").toInt(),
+            )
+        }
+            .getOrElse { FileMonitorEntry("", "", "", "", "") }
+
         // 从日志单行解析监视记录
         fun parse(line: String): FileMonitorEntry {
+            if (line.startsWith("{")) return parseJson(line)
             val parts = line.split("|")
             if (parts.size < MIN_FIELD_COUNT) {
                 return FileMonitorEntry(
@@ -261,11 +330,12 @@ data class FileMonitorEntry(
                 path = parts[4],
                 resultCode = resultCode,
                 errorNo = errorNo,
-                extra = if (parts.size > MIN_FIELD_COUNT) {
-                    parts.subList(MIN_FIELD_COUNT, parts.size).joinToString("|")
-                } else {
-                    null
-                },
+                extra =
+                    if (parts.size > MIN_FIELD_COUNT) {
+                        parts.subList(MIN_FIELD_COUNT, parts.size).joinToString("|")
+                    } else {
+                        null
+                    },
             )
         }
     }
@@ -281,6 +351,11 @@ enum class MonitorActionType {
     CREATE,
     DELETE,
     RENAME,
+    READ,
+    WRITE,
+    TRUNCATE,
+    MAP,
+    SYNC,
 }
 
 enum class MonitorResultState {

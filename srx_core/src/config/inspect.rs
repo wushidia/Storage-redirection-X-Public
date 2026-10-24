@@ -47,7 +47,11 @@ impl SettingsHub {
     }
 
     pub fn should_monitor(&self, package_name: &str, app_uid: i32) -> bool {
-        if package_name == SELF_PACKAGE_NAME {
+        if matches!(
+            package_name,
+            SELF_PACKAGE_NAME | "android" | "com.android.systemui" | "system_server"
+        ) || platform::user_id_from_uid(app_uid) != 0
+        {
             return false;
         }
 
@@ -60,7 +64,9 @@ impl SettingsHub {
             return false;
         }
 
-        if policy::is_system_writer_package(package_name) || policy::is_shared_uid_process(app_uid)
+        if policy::is_system_writer_package(package_name)
+            || policy::is_shared_uid_process(app_uid)
+            || package_name == "com.android.providers.downloads"
         {
             log::info!(
                 "monitor on: writer proc pkg={} uid={}",

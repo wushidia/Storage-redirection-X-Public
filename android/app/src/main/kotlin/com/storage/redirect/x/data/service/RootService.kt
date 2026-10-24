@@ -1,6 +1,7 @@
 package com.storage.redirect.x.data.service
 
 import android.util.Base64
+import com.storage.redirect.x.BuildConfig
 import com.storage.redirect.x.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -87,7 +88,7 @@ object RootService {
 
     private fun isSafePackageName(packageName: String): Boolean =
         packageName.isNotEmpty() &&
-            packageName != "com.storage.redirect.x" &&
+            packageName != BuildConfig.APPLICATION_ID &&
             packageName.all { it.isLetterOrDigit() || it == '.' || it == '_' }
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"

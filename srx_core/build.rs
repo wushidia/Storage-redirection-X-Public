@@ -4,12 +4,12 @@ use std::process::Command;
 
 // 执行构建配置
 fn main() {
-    build_hooker_dex();
-
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "android" {
         return;
     }
+
+    build_hooker_dex();
 
     println!("cargo:rustc-link-lib=log");
     println!("cargo:rustc-link-lib=android");
@@ -179,13 +179,8 @@ fn build_hooker_dex() {
     let dex_out = out_dir.join("Hooker.dex");
     let java_src_dir = PathBuf::from("java_src");
 
-    match compile_dex(&java_src_dir, &out_dir, &dex_out) {
-        Ok(()) => {}
-        Err(err) => {
-            // 工具链缺失不阻断构建；运行时若 dex 为空则跳过 Java hook 初始化
-            println!("cargo:warning=srx_core: Hooker.dex build skipped: {err}");
-            let _ = std::fs::write(&dex_out, b"");
-        }
+    if let Err(error) = compile_dex(&java_src_dir, &out_dir, &dex_out) {
+        panic!("monitor DEX build failed: {error}");
     }
 }
 
@@ -203,9 +198,9 @@ fn compile_dex(java_src_dir: &Path, out_dir: &Path, dex_out: &Path) -> Result<()
 
     let mut javac_cmd = Command::new(&javac);
     javac_cmd
-        .args(["-source", "8", "-target", "8"])
+        .args(["-J-Xmx256m", "--release", "8", "-Xlint:-options"])
         .arg("-classpath")
-        .arg(android_jar)
+        .arg(&android_jar)
         .arg("-d")
         .arg(&classes_dir);
     for java_file in java_files {
@@ -225,6 +220,11 @@ fn compile_dex(java_src_dir: &Path, out_dir: &Path, dex_out: &Path) -> Result<()
 
     let class_files = collect_class_files(&classes_dir)?;
     let mut d8_cmd = Command::new(&d8);
+    d8_cmd.arg("--lib").arg(&android_jar);
+    d8_cmd.env(
+        "JAVA_OPTS",
+        "-Xmx512m -XX:ActiveProcessorCount=2 -XX:+UseSerialGC",
+    );
     for class_file in class_files {
         d8_cmd.arg(class_file);
     }
@@ -299,7 +299,10 @@ fn locate_android_jar() -> Option<PathBuf> {
     let mut best: Option<(u32, PathBuf)> = None;
     for entry in std::fs::read_dir(&platforms).ok()?.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(api) = name.strip_prefix("android-").and_then(|s| s.parse().ok()) else {
+        let Some(api) = name
+            .strip_prefix("android-")
+            .and_then(|s| s.split('.').next()?.parse().ok())
+        else {
             continue;
         };
         let jar = entry.path().join("android.jar");

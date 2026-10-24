@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- miuix-blur 声明 minSdk 33，内部已按 API 级别回退，低版本安全 -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+
+    <application>
+        <provider
+            android:name=".debug.DebugCommandProvider"
+            android:authorities="${applicationId}.commands"
+            android:enabled="true"
+            android:permission="android.permission.DUMP"
+            android:exported="true" />
+    </application>
+</manifest>

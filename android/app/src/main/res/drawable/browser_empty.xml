@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 资源来自用户提供的 com.android.fileexplorer 9.3.0.5。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="88dp" android:width="88dp" android:viewportWidth="88" android:viewportHeight="88">
+    <path android:fillColor="#fff9e0" android:pathData="M7,17.7108C7,14.5568 9.5568,12 12.7108,12L37.6174,12C39.49,12 41.2724,12.8043 42.5113,14.2085L46.7399,19.0008L69.2381,19.0008C72.3922,19.0008 74.949,21.5576 74.949,24.7116V64.7665C74.949,67.9205 72.3922,70.4773 69.2381,70.4773H12.7108C9.5568,70.4773 7,67.9205 7,64.7665L7,17.7108Z" />
+    <path android:fillColor="#fed735" android:pathData="M17.2406,24.7666L75.0034,24.7666A5.7108,5.7108 0,0 1,80.7142 30.4774L80.7142,69.7087A5.7108,5.7108 0,0 1,75.0034 75.4195L17.2406,75.4195A5.7108,5.7108 0,0 1,11.5298 69.7087L11.5298,30.4774A5.7108,5.7108 0,0 1,17.2406 24.7666z" android:fillAlpha="0.22" />
+    <path android:fillColor="#ffffff" android:pathData="M43.2276,31.7676L72.0779,31.7676A1.2237,1.2237 0,0 1,73.3016 32.9913L73.3016,35.4856A1.2237,1.2237 0,0 1,72.0779 36.7093L43.2276,36.7093A1.2237,1.2237 0,0 1,42.0039 35.4856L42.0039,32.9913A1.2237,1.2237 0,0 1,43.2276 31.7676z" android:fillAlpha="0.8" />
+</vector>

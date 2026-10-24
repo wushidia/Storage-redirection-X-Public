@@ -17,10 +17,6 @@ object BackupRestoreNotifier {
     private const val NOTIFICATION_ID_RESTORE = 30002
 
     fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return
-        }
-
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         val existing = manager.getNotificationChannel(CHANNEL_ID)
         if (existing != null) {
@@ -45,9 +41,9 @@ object BackupRestoreNotifier {
             context.getString(R.string.notification_backup_failed_title)
         }
         val text = if (success) {
-            context.getString(R.string.notification_backup_success_text, packageCount)
+            context.resources.getQuantityString(R.plurals.notification_backup_success_text, packageCount, packageCount)
         } else {
-            context.getString(R.string.notification_backup_failed_text, packageCount)
+            context.resources.getQuantityString(R.plurals.notification_backup_failed_text, packageCount, packageCount)
         }
         notify(context, NOTIFICATION_ID_BACKUP, title, text, success)
     }
@@ -64,13 +60,15 @@ object BackupRestoreNotifier {
             context.getString(R.string.notification_restore_failed_title)
         }
         val text = if (success) {
-            context.getString(
-                R.string.notification_restore_success_text,
+            context.resources.getQuantityString(
+                R.plurals.notification_restore_success_text,
+                restoredPackageCount,
                 restoredPackageCount,
             )
         } else {
-            context.getString(
-                R.string.notification_restore_failed_text,
+            context.resources.getQuantityString(
+                R.plurals.notification_restore_failed_text,
+                restoredPackageCount,
                 restoredPackageCount,
             )
         }

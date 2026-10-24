@@ -6,7 +6,6 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, Ordering};
 
 const STATS_TAG: &str = "Stats";
-const SELF_MODULE_PATH: &str = "libsrx_core.so";
 const FLUSH_THRESHOLD: i32 = 32;
 const FLUSH_INTERVAL_MS: i64 = 2000;
 
@@ -146,15 +145,19 @@ impl InterceptHub {
         }
 
         log::info!("hook install start");
-        let errno = srx_hook::init(srx_hook::HookMode::Automatic, false);
+        // Register actual Zygisk image names before initializing the hook runtime.
+        // Refresh occurs once here and at FuseDaemon.run, never via dlopen proxies.
+        for image in [
+            "libsrx_core.so",
+            "storage.redirect.x/zygisk/arm64-v8a.so",
+            "storage.redirect.x/zygisk/x86_64.so",
+        ] {
+            let _ = srx_hook::add_ignore(image);
+        }
+        let errno = srx_hook::init(srx_hook::HookMode::Manual, false);
         if !errno.is_ok() {
             log::warn!("srx_hook init failed err={:?}", errno);
             return false;
-        }
-
-        let ignore_errno = srx_hook::add_ignore(SELF_MODULE_PATH);
-        if !ignore_errno.is_ok() {
-            log::warn!("add_ignore failed err={:?}", ignore_errno);
         }
 
         let is_system_writer = policy::is_system_writer_package(&self.get_package_name());

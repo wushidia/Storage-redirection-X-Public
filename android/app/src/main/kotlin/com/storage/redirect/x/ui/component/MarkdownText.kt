@@ -31,10 +31,11 @@ fun MarkdownText(
         for (line in lines) {
             val trimmed = line.trimStart()
             when {
-                trimmed.startsWith("- ") -> MarkdownListRow(
-                    text = trimmed.removePrefix("- "),
-                    style = style
-                )
+                trimmed.startsWith("- ") ->
+                    MarkdownListRow(
+                        text = trimmed.removePrefix("- "),
+                        style = style,
+                    )
                 trimmed.isBlank() -> Spacer(Modifier.height(MD_BLANK_LINE))
                 else -> Text(text = parseBold(trimmed), style = style)
             }

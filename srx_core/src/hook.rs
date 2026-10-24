@@ -66,3 +66,18 @@ pub unsafe extern "C" fn srx_prepare_fuse_private_owner_sqlite_sidecar(
     };
     media_fuse::prepare_private_owner_sqlite_sidecar(path)
 }
+
+pub fn refresh_provider_libraries() {
+    if !InterceptHub::instance().is_hooks_installed() {
+        return;
+    }
+    let _guard = context::ReentryGuard::enter();
+    let (status, errors) = srx_hook::refresh();
+    if !status.is_ok() || !errors.is_empty() {
+        log::warn!(
+            "provider library refresh err={:?} modules={}",
+            status,
+            errors.len()
+        );
+    }
+}

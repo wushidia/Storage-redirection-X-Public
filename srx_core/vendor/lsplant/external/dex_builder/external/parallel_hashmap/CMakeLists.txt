@@ -199,7 +199,6 @@ if (PHMAP_BUILD_EXAMPLES)
     add_executable(ex_mt_word_counter examples/mt_word_counter.cc phmap.natvis)
     add_executable(ex_p_bench examples/p_bench.cc phmap.natvis)
 
-    #set(Boost_INCLUDE_DIR /home/greg/dev/boost_1_82_0) # if boost installed in non-standard location
     set(Boost_USE_STATIC_LIBS OFF)
     set(Boost_USE_MULTITHREADED ON)
     set(Boost_USE_STATIC_RUNTIME OFF)

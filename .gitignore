@@ -1,88 +1,105 @@
-# Build outputs
-build/
-!scripts/src/build/
-!scripts/src/build/*.rs
+# 默认忽略文件，只放行产品、构建输入与共享规范。
+*
+!/.gitignore
+!/AGENTS.md
+!/CLAUDE.md
+!/README.md
+!/LICENSE
+!/Cargo.toml
+!/Cargo.lock
 
-# e2e 测试拉取的测试仓源码
-test_app/
+# 项目技能入口，只放行这一份配置。
+!/.pi/
+!/.pi/settings.json
 
-# IDE
-.idea/
-.vscode/
-*.iml
-*.ipr
-*.iws
+# Android 源码、资源与 Gradle wrapper。
+!/android/
+!/android/*.kts
+!/android/gradle.properties
+!/android/gradlew*
+!/android/gradle/
+!/android/gradle/**/
+!/android/gradle/libs.versions.toml
+!/android/gradle/wrapper/gradle-wrapper.*
+!/android/app/
+!/android/app/build.gradle.kts
+!/android/app/proguard-rules.pro
+!/android/app/src/
+!/android/app/src/**/
+!/android/app/src/**/*.kt
+!/android/app/src/test/**/*.java
+!/android/app/src/**/*.xml
+!/android/app/src/main/res/**/*.png
+!/android/app/src/main/res/resources.properties
 
-# Android / Gradle
-android/.gradle/
-android/.kotlin/
-android/.cxx/
-android/**/build/
-android/local.properties
-compose/.gradle/
-compose/.kotlin/
-compose/**/build/
-compose/local.properties
-*.jks
-*.keystore
+# Rust、Java Hook 与原生依赖；不放行生成的 DEX、库或补丁存档。
+!/srx_core/
+!/srx_core/Cargo.toml
+!/srx_core/build.rs
+!/srx_core/src/
+!/srx_core/src/**/
+!/srx_core/src/**/*.rs
+!/srx_core/java_src/
+!/srx_core/java_src/**/
+!/srx_core/java_src/**/*.java
+!/srx_core/native/
+!/srx_core/native/CMakeLists.txt
+!/srx_core/native/*.cpp
+!/srx_core/vendor/
+!/srx_core/vendor/lsplant/
+!/srx_core/vendor/lsplant/**/
+!/srx_core/vendor/lsplant/**/*.cc
+!/srx_core/vendor/lsplant/**/*.cpp
+!/srx_core/vendor/lsplant/**/*.cxx
+!/srx_core/vendor/lsplant/**/*.h
+!/srx_core/vendor/lsplant/**/*.hpp
+!/srx_core/vendor/lsplant/**/*.ixx
+!/srx_core/vendor/lsplant/**/*.cmake
+!/srx_core/vendor/lsplant/**/CMakeLists.txt
+!/srx_core/vendor/lsplant/**/LICENSE*
 
-# Zygisk (native build artifacts)
-native/
-!srx_core/native/
-srx_core/build/
-srx_core/libs/
-srx_core/releases/
-**/target/
-assets/zygisk_module/module.prop
-assets/zygisk_module/module_version.txt
-assets/zygisk_module/libs/**
-!assets/zygisk_module/libs/.gitkeep
+# 构建脚本与模块安装、运行资源。
+!/scripts/
+!/scripts/*.py
+!/assets/
+!/assets/zygisk_module/
+!/assets/zygisk_module/*.sh
+!/assets/zygisk_module/sepolicy.rule
+!/assets/zygisk_module/service.d/
+!/assets/zygisk_module/service.d/*.sh
+!/assets/zygisk_module/META-INF/
+!/assets/zygisk_module/META-INF/**/
+!/assets/zygisk_module/META-INF/com/google/android/update-binary
+!/assets/zygisk_module/META-INF/com/google/android/updater-script
 
-# Lock files
-Cargo.lock
-srx_core/Cargo.lock
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-bun.lockb
-npm-shrinkwrap.json
-composer.lock
-Gemfile.lock
-Podfile.lock
-**/gradle.lockfile
+# 现有 CI 与发布输入，不放行普通说明文档。
+!/.github/
+!/.github/CHANGELOG.md
+!/.github/docs/
+!/.github/docs/README.zh-CN.md
+!/.github/workflows/
+!/.github/workflows/*.yml
+!/.github/tests/
+!/.github/tests/*.sh
+!/.github/vendor/
+!/.github/vendor/rootAVD/
+!/.github/vendor/rootAVD/*.sh
+!/.github/vendor/rootAVD/*.bat
 
-# Local tooling / AI assistants
-.codex/*
-!.codex/skills/
-.codex/skills/*
-!.codex/skills/version-bump/
-!.codex/skills/version-bump/SKILL.md
-codex/
-.claude/*
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/version-bump/
-!.claude/skills/version-bump/SKILL.md
-.worktrees/
-AGENTS.md
-CLAUDE.md
-
-# Secrets / local credentials
-.env
-.env.*
-*.pem
-*.key
-*.p8
-*.p12
-*.cer
-
-# Local scratch files
-tmp_*.rs
-*.txt
-!srx_core/native/CMakeLists.txt
-!srx_core/vendor/lsplant/CMakeLists.txt
-!srx_core/vendor/lsplant/external/dex_builder/CMakeLists.txt
-!srx_core/vendor/lsplant/external/dex_builder/external/parallel_hashmap/CMakeLists.txt
-*.json
-
-*.code-workspace
+# 共享技能；其他调试技能与会话保持本地。
+!/.claude/
+!/.claude/skills/
+!/.claude/skills/commit/
+!/.claude/skills/commit/SKILL.md
+!/.claude/skills/pull-request/
+!/.claude/skills/pull-request/SKILL.md
+!/.claude/skills/version-bump/
+!/.claude/skills/version-bump/SKILL.md
+!/.codex/
+!/.codex/skills/
+!/.codex/skills/commit/
+!/.codex/skills/commit/SKILL.md
+!/.codex/skills/pull-request/
+!/.codex/skills/pull-request/SKILL.md
+!/.codex/skills/version-bump/
+!/.codex/skills/version-bump/SKILL.md

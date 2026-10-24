@@ -57,6 +57,10 @@ class SharedUidRepository {
         return uidToPackages[uid] ?: emptyList()
     }
 
+    // 全部共享 UID 组的包名集合，沿用已加载映射
+    fun allSharedUidPackages(): Set<String> =
+        uidToPackages.values.flatten().toSet()
+
     // 判断包名是否属于共享 UID 组
     fun isSharedUidPackage(packageName: String): Boolean {
         val uid = packageToUid[packageName] ?: return false

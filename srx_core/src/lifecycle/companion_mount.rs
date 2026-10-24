@@ -17,9 +17,8 @@ use stats::update_redirect_stats;
 use status_marker::write_mount_status_marker;
 use sys::{c_str, decode_wait_status, errno_text, last_errno};
 
-// 父进程等待挂载结果的超时 — 之前的 2s 在高负载/FUSE 异常场景下
-// 容易直接进入 SIGKILL 流程，把 mount writer 持锁的子进程强杀，
-// 进而损坏 FUSE 命名空间状态拖死 MediaProvider。
+// 父进程等待挂载结果超时；取值过短会在高负载/FUSE 异常时
+// 触发 SIGKILL 强杀持锁子进程，损坏 FUSE 命名空间拖死 MediaProvider
 const PARENT_RECV_PRIMARY_TIMEOUT_SEC: i64 = 5;
 // SIGTERM 后再给的 grace，让子进程在用户态完成清理或回报结果后退出。
 const PARENT_RECV_GRACE_TIMEOUT_SEC: i64 = 1;

@@ -87,6 +87,9 @@ backup_existing_config
 print_progress 20 "extract module files"
 unzip -o "$ZIPFILE" -d "$MODPATH" >&2
 
+. "$MODPATH/persistent_data.sh"
+prepare_persistent_logs "$ACTIVE_MODULE_DIR" "$MODPATH" || abort "-- cannot preserve log storage"
+
 # 获取设备架构
 ARCH=$(getprop ro.product.cpu.abi 2>/dev/null)
 if [ -z "$ARCH" ]; then
@@ -247,7 +250,8 @@ if [ ! -f "$MODPATH/config/global.json" ]; then
     ui_print "-- create default global config"
     cat > "$MODPATH/config/global.json" << 'EOF'
 {
-  "file_monitor_enabled": true
+  "file_monitor_enabled": true,
+  "file_monitor_retention_seconds": 604800
 }
 EOF
     chmod 644 "$MODPATH/config/global.json"

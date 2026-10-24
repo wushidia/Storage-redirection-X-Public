@@ -22,6 +22,10 @@ const CALLBACK_SIG: &[u8] = b"(Lorg/srx/hook/Hooker;[Ljava/lang/Object;)Ljava/la
 const FILTER_PATH_NAME: &[u8] = b"filterPath\0";
 const FILTER_PATH_SIG: &[u8] = b"(Ljava/lang/String;IZ)Ljava/lang/String;\0";
 
+unsafe extern "C" fn refresh_provider_libraries(_env: *mut JNIEnv, _class: jclass) {
+    crate::hook::refresh_provider_libraries();
+}
+
 pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     if env.is_null() || hooker_class.is_null() {
         return false;
@@ -31,6 +35,11 @@ pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     }
 
     let methods = [
+        JNINativeMethod {
+            name: c"refreshProviderLibraries".as_ptr() as *mut _,
+            signature: c"()V".as_ptr() as *mut _,
+            fnPtr: refresh_provider_libraries as *mut _,
+        },
         JNINativeMethod {
             name: DO_HOOK_NAME.as_ptr() as *mut _,
             signature: DO_HOOK_SIG.as_ptr() as *mut _,

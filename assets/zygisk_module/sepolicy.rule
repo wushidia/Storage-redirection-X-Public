@@ -62,8 +62,11 @@ allow appdomain device file getattr
 
 allow zygote su unix_dgram_socket sendto
 allow appdomain su unix_dgram_socket sendto
+allow appdomain magisk unix_dgram_socket sendto
 allow mediaprovider su unix_dgram_socket sendto
+allow mediaprovider magisk unix_dgram_socket sendto
 allow mediaprovider_app su unix_dgram_socket sendto
+allow mediaprovider_app magisk unix_dgram_socket sendto
 allow system_server su unix_dgram_socket sendto
 allow su su unix_dgram_socket sendto
 allow zygote ksu unix_dgram_socket sendto
@@ -72,3 +75,14 @@ allow mediaprovider ksu unix_dgram_socket sendto
 allow mediaprovider_app ksu unix_dgram_socket sendto
 allow system_server ksu unix_dgram_socket sendto
 allow ksu ksu unix_dgram_socket sendto
+
+# File-access events use a Binder channel owned by the root monitor service.
+allow appdomain magisk binder { call transfer }
+allow appdomain su binder { call transfer }
+allow appdomain ksu binder { call transfer }
+allow mediaprovider magisk binder { call transfer }
+allow mediaprovider su binder { call transfer }
+allow mediaprovider ksu binder { call transfer }
+allow mediaprovider_app magisk binder { call transfer }
+allow mediaprovider_app su binder { call transfer }
+allow mediaprovider_app ksu binder { call transfer }

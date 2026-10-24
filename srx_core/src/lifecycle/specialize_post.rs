@@ -183,6 +183,7 @@ fn log_post_perf(
 }
 
 fn install_plt_hook(package_name: &str, should_monitor: bool, is_redirect_via_hook: bool) {
+    let should_monitor = should_monitor && platform::android_api_level() < 30;
     let is_monitor_only = !is_redirect_via_hook;
     let should_install = should_monitor || is_redirect_via_hook;
     if !should_install {

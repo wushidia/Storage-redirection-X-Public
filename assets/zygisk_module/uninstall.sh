@@ -33,6 +33,14 @@ stop_collector_by_pid_file() {
   rm -f "$pid_file"
 }
 
+if [ -r /dev/srx_file_monitor.pid ]; then
+  monitor_pid=$(cat /dev/srx_file_monitor.pid)
+  case "$(tr '\0' ' ' < "/proc/$monitor_pid/cmdline" 2>/dev/null)" in
+    *org.srx.monitor.MonitorServer*) kill "$monitor_pid" 2>/dev/null ;;
+  esac
+  rm -f /dev/srx_file_monitor.pid
+fi
+rm -f /dev/srx_file_monitor_health.json
 stop_collector_by_pid_file "$LOGD_PID_FILE"
 stop_collector_by_pid_file "$MEDIA_STATE_COLLECTOR_PID_FILE"
 stop_collector_by_pid_file "$APP_STATUS_SNAPSHOT_PID_FILE"

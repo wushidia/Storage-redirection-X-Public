@@ -1,12 +1,16 @@
 package com.storage.redirect.x
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.storage.redirect.x.data.cache.AppPreferences
 import com.storage.redirect.x.data.cache.DeviceInfoCache
@@ -18,6 +22,9 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+
+    // debug 指令 page.open 的待消费页面，App 层切页后置空
+    private var pendingDebugPage by mutableStateOf<String?>(null)
 
     override fun attachBaseContext(newBase: Context) {
         // 在 Context 初始化前应用已保存的语言设置
@@ -47,8 +54,13 @@ class MainActivity : ComponentActivity() {
         BackupRestoreNotifier.ensureChannel(this)
 
         setContent {
-            App()
+            App(
+                pendingDebugPage = pendingDebugPage,
+                onDebugPageConsumed = { pendingDebugPage = null },
+            )
         }
+
+        consumeDebugPage(intent)
 
         // 根据偏好设置决定是否在启动时检查更新
         if (AppPreferences.getBoolean(PreferenceKeys.CHECK_UPDATE_ON_LAUNCH, true)) {
@@ -69,5 +81,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        consumeDebugPage(intent)
+    }
+
+    private fun consumeDebugPage(intent: Intent?) {
+        if (intent?.action != DebugPage.ACTION_OPEN_PAGE) return
+        pendingDebugPage = intent.getStringExtra(DebugPage.EXTRA_PAGE)
     }
 }

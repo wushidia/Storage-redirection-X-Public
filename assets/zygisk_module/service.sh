@@ -2,6 +2,9 @@
 
 MODDIR=${0%/*}
 
+. "$MODDIR/persistent_data.sh"
+prepare_persistent_logs "$MODDIR" "$MODDIR" || exit 1
+
 LOGS_DIR="$MODDIR/logs"
 RUNNING_LOG_FILE="$LOGS_DIR/running.log"
 FILE_MONITOR_LOG_FILE="$LOGS_DIR/file_monitor.log"
@@ -30,7 +33,7 @@ mkdir -p "$LOGS_DIR"
 chmod 755 "$LOGS_DIR"
 
 SERVICE_DIR="$MODDIR/service.d"
-SERVICE_PARTS="common.sh logd.sh media_state.sh app_status.sh config_events.sh boot.sh"
+SERVICE_PARTS="common.sh logd.sh file_monitor.sh media_state.sh app_status.sh config_events.sh boot.sh"
 
 for service_name in $SERVICE_PARTS; do
   service_part="$SERVICE_DIR/$service_name"
@@ -42,4 +45,5 @@ for service_name in $SERVICE_PARTS; do
 done
 
 start_log_daemon || exit 1
+start_file_monitor_service
 boot_guard_wait &
