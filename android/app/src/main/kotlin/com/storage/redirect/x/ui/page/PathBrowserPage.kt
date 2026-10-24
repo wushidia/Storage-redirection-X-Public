@@ -12,20 +12,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.compose.ui.unit.dp
 import com.storage.redirect.x.BuildConfig
 import com.storage.redirect.x.R
 import com.storage.redirect.x.data.repository.PathBrowserRepository
 import com.storage.redirect.x.ui.page.pathbrowser.BrowserBreadcrumbs
-import com.storage.redirect.x.ui.page.pathbrowser.BrowserDialog
 import com.storage.redirect.x.ui.page.pathbrowser.BrowserDirectoryList
 import com.storage.redirect.x.ui.page.pathbrowser.BrowserScaffold
 import com.storage.redirect.x.ui.page.pathbrowser.BrowserSearch
-import com.storage.redirect.x.ui.page.pathbrowser.BrowserSelectionDock
-import com.storage.redirect.x.ui.page.pathbrowser.BrowserText
 import com.storage.redirect.x.ui.page.pathbrowser.PathBrowserDialogs
 import com.storage.redirect.x.ui.page.pathbrowser.PathBrowserState
-import com.storage.redirect.x.ui.page.pathbrowser.browserColors
 
 @Composable
 fun PathBrowserPage(
@@ -55,18 +50,16 @@ fun PathBrowserPage(
 
     BrowserScaffold(
         title = title,
+        state = state,
         onBack = navigateBack,
-        onSettings = { state.dialog = BrowserDialog.Settings },
         modifier = Modifier
             .fillMaxSize()
             .semantics { testTagsAsResourceId = BuildConfig.IS_DEBUG_BUILD }
             .testTag("page_path_browser"),
-        bottomBar = {
-            BrowserSelectionDock(state) {
-                val paths = state.confirmedPaths()
-                if (paths.isNotEmpty()) {
-                    if (multiSelect) onPathsSelect(paths) else onPathSelect(paths.first())
-                }
+        onConfirm = {
+            val paths = state.confirmedPaths()
+            if (paths.isNotEmpty()) {
+                if (multiSelect) onPathsSelect(paths) else onPathSelect(paths.first())
             }
         },
     ) { padding ->
@@ -76,5 +69,5 @@ fun PathBrowserPage(
             BrowserDirectoryList(state, Modifier.weight(1f))
         }
     }
-    PathBrowserDialogs(state)
+    PathBrowserDialogs(state, browserRepository)
 }

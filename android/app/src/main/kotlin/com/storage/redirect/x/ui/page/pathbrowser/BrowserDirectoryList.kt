@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -18,48 +17,25 @@ import com.storage.redirect.x.ui.component.CardItem
 import com.storage.redirect.x.ui.component.SrxLazyColumn
 import com.storage.redirect.x.ui.component.groupedCardItems
 import top.yukonga.miuix.kmp.basic.*
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.*
-import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 
 @Composable
 internal fun BrowserDirectoryList(state: PathBrowserState, modifier: Modifier = Modifier) {
-    val entries = remember(state.directories, state.query, state.showHidden, state.isDescending) { state.visibleDirectories }
+    val entries = remember(state.directories, state.query, state.isDescending) { state.visibleDirectories }
     val listState = rememberLazyListState()
-    val sortOptions = listOf(stringResource(R.string.browser_sort_ascending), stringResource(R.string.browser_sort_descending))
-    val sortEntry = remember(sortOptions, state.isDescending) {
-        DropdownEntry(sortOptions.mapIndexed { index, label ->
-            DropdownItem(text = label, selected = state.isDescending == (index == 1),
-                onClick = { state.isDescending = index == 1 })
-        })
-    }
-    LaunchedEffect(state.currentPath, state.query, state.showHidden, state.isDescending) { listState.scrollToItem(0) }
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(start = 26.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            BrowserText(stringResource(R.string.browser_directory_count, entries.size),
-                modifier = Modifier.weight(1f), color = browserColors().summary, fontSize = 12.sp)
-            BrowserText(sortOptions[if (state.isDescending) 1 else 0],
-                color = browserColors().summary, fontSize = 12.sp)
-            Spacer(Modifier.width(4.dp))
-            OverlayIconDropdownMenu(entry = sortEntry, minWidth = 35.dp, minHeight = 35.dp,
-                backgroundColor = Color.Transparent, modifier = Modifier.testTag("browser_sort")) {
-                Icon(MiuixIcons.Sort, stringResource(R.string.browser_sort), Modifier.size(20.dp))
+    LaunchedEffect(state.currentPath, state.query, state.isDescending) { listState.scrollToItem(0) }
+    SrxLazyColumn(state = listState, modifier = modifier.testTag("browser_directories")) {
+        when {
+            state.isLoading -> item {
+                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
-        }
-        SrxLazyColumn(state = listState, modifier = Modifier.testTag("browser_directories")) {
-            when {
-                state.isLoading -> item {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            state.hasLoadError || entries.isEmpty() -> item {
+                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                    BrowserEmptyState(state)
                 }
-                state.hasLoadError || entries.isEmpty() -> item {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                        BrowserEmptyState(state)
-                    }
-                }
-                else -> groupedCardItems("directories", entries.map { path ->
-                    CardItem(path) { BrowserDirectoryRow(state, path) }
-                })
             }
+            else -> groupedCardItems("directories", entries.map { path ->
+                CardItem(path) { BrowserDirectoryRow(state, path) }
+            })
         }
     }
 }
@@ -93,13 +69,9 @@ private fun BrowserDirectoryRow(state: PathBrowserState, path: String) {
                 Modifier.padding(end = 16.dp).size(40.dp))
         },
         endActions = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (state.multiSelect && canSelect) BrowserCheckbox(path in state.selectedPaths,
-                    stringResource(R.string.browser_select_directory, path.substringAfterLast('/')),
-                    { state.togglePath(path) }, Modifier.testTag("browser_select_$path"))
-                Icon(painterResource(R.drawable.browser_chevron), null,
-                    Modifier.width(10.dp).height(16.dp), tint = browserColors().text)
-            }
+            if (state.multiSelect && canSelect) BrowserCheckbox(path in state.selectedPaths,
+                stringResource(R.string.browser_select_directory, path.substringAfterLast('/')),
+                { state.togglePath(path) }, Modifier.testTag("browser_select_$path"))
         },
     ) {
         BrowserText(path.substringAfterLast('/'), fontSize = 17.sp,

@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -365,11 +366,13 @@ fun RuleConfigPage(
                     },
                     actions = {
                         IconButton(onClick = { templates = templateRepo.loadTemplates(); showTemplatePicker.value = true },
+                            backgroundColor = Color.Transparent,
                             modifier = Modifier.testTag("rule_config_apply_template")) {
                             Icon(MiuixIcons.Paste, stringResource(R.string.apps_apply_template))
                         }
 
                         IconButton(
+                            backgroundColor = Color.Transparent,
                             onClick = {
                                 if (allowedPaths.isEmpty() && pathMappings.isEmpty()) {
                                     Toast.makeText(

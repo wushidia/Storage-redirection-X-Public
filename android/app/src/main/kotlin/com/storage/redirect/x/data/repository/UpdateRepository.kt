@@ -20,7 +20,7 @@ class UpdateRepository {
     companion object {
         // GitHub Releases API 地址
         private const val API_URL =
-            "https://api.github.com/repos/Kindness-Kismet/Storage-redirection-X-Public/releases/latest"
+            "https://api.github.com/repos/wushidia/Storage-redirection-X-Public/releases/latest"
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 10_000
         private const val REQUEST_ACCEPT = "application/vnd.github+json"

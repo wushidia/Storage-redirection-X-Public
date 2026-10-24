@@ -1,6 +1,5 @@
 package com.storage.redirect.x.ui.page.pathbrowser
 
-import android.annotation.SuppressLint
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -10,7 +9,7 @@ import com.storage.redirect.x.data.model.PathValidationResult
 import com.storage.redirect.x.data.model.RedirectConfig
 import com.storage.redirect.x.data.repository.PathBrowserRepository
 
-internal enum class BrowserDialog { Settings, Location, Selection }
+internal enum class BrowserDialog { CreateDirectory, Selection }
 
 @Stable
 internal class PathBrowserState(
@@ -31,26 +30,16 @@ internal class PathBrowserState(
         private set
     var hasLoadError by mutableStateOf(false)
         private set
-    var showHidden by mutableStateOf(true)
     var isDescending by mutableStateOf(false)
     var isExcludeMode by mutableStateOf(allowExclude && isInitiallyExcluded)
     var reloadKey by mutableIntStateOf(0)
     var dialog by mutableStateOf<BrowserDialog?>(null)
     private var loadGeneration = 0
 
-    // 目标可能属于其他用户或应用私有挂载点，不能使用当前用户的存储目录。
-    @get:SuppressLint("SdCardPath")
-    val rootPath: String
-        get() = if (packageName == null) "/storage/emulated/$userId"
-        else "/storage/emulated/$userId/Android/data/$packageName/sdcard"
-
-    val absolutePath: String
-        get() = if (currentPath.isEmpty()) rootPath else "$rootPath/$currentPath"
-
     val visibleDirectories: List<String>
         get() = directories.filter { path ->
             val name = path.substringAfterLast('/')
-            (showHidden || !name.startsWith('.')) && name.contains(query.trim(), ignoreCase = true)
+            name.contains(query.trim(), ignoreCase = true)
         }.let { if (isDescending) it.reversed() else it }
 
     val canConfirm: Boolean
@@ -82,6 +71,13 @@ internal class PathBrowserState(
     fun togglePath(path: String) {
         if (!multiSelect || !canSelect(path)) return
         selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+    }
+
+    fun toggleVisibleSelection() {
+        if (!multiSelect) return
+        val selectable = visibleDirectories.filter(::canSelect).toSet()
+        selectedPaths = if (selectable.all { it in selectedPaths }) selectedPaths - selectable
+        else selectedPaths + selectable
     }
 
     fun clearSelection() {

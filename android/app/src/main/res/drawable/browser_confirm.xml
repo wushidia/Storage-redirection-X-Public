@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自用户提供的小米文件管理器 9.3.0.5：file_miuix_action_icon_confirm，MiSymbol U+F0008 原始轮廓。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="1200" android:viewportHeight="1200">
+    <path android:fillColor="#FF000000" android:pathData="M1126 178.493 1098 155.493Q1089 148.493 1078 149.993Q1067 151.493 1060 160.493L467 932.493Q465 935.493 462 935.493Q459 935.493 457 932.493L140 522.493Q133 514.493 122 512.993Q111 511.493 102 518.493L74 541.493Q65 548.493 63.5 559.493Q62 570.493 69 578.493L421 1029.493Q431 1042.493 445.5 1047.493Q460 1052.493 474.5 1048.493Q489 1044.493 498 1032.493L1131 216.493Q1138 207.493 1136.5 196.493Q1135 185.493 1126 178.493Z" />
+</vector>

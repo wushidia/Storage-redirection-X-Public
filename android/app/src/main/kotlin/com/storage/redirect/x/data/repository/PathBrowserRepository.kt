@@ -6,6 +6,8 @@ import com.storage.redirect.x.data.model.RedirectConfig
 import com.storage.redirect.x.data.service.RootService
 import com.storage.redirect.x.data.service.CommandResult
 
+enum class DirectoryCreateResult { Created, AlreadyExists, InvalidName, Failed }
+
 // 目录浏览数据源，读取当前用户存储目录并转为相对路径
 class PathBrowserRepository(
     private val runCommand: suspend (String) -> CommandResult = RootService::runCommand,
@@ -70,6 +72,36 @@ class PathBrowserRepository(
             }
             .sorted()
             .toList()
+    }
+
+    @SuppressLint("SdCardPath")
+    suspend fun createDirectory(
+        userId: Int, packageName: String?, relativePath: String, name: String,
+    ): DirectoryCreateResult {
+        val child = name.trim()
+        if (child.isEmpty() || child == "." || child == ".." || child.startsWith('!') ||
+            child.any { it in "/\u0000\n\r*?" }) return DirectoryCreateResult.InvalidName
+        val normalized = if (packageName == null) normalizeRelativePath(relativePath)
+            else normalizeSimpleRelativePath(relativePath)
+        if (normalized == null) return DirectoryCreateResult.InvalidName
+        val base = if (packageName == null) "/storage/emulated/$userId"
+            else "/data/media/$userId/Android/data/$packageName/sdcard"
+        val parent = if (normalized.isEmpty()) base else "$base/$normalized"
+        val target = quotePath("$parent/$child")
+        // 私有后端绕过 FUSE，继承父目录所有者与媒体组，保持应用可写。
+        val prepare = if (packageName == null) "" else
+            "owner=\$(stat -c '%u:%g' ${quotePath(parent)}) || exit 1; "
+        val mkdir = if (packageName == null) "mkdir $target" else "mkdir -m 2770 $target"
+        val permissions = if (packageName == null) "" else "chown \"\$owner\" $target || exit 1; "
+        val result = runCommand(prepare +
+            "if $mkdir 2>/dev/null; then ${permissions}printf created; " +
+            "elif [ -e $target ]; then printf exists; else exit 1; fi")
+        if (!result.isSuccess) return DirectoryCreateResult.Failed
+        return when (result.stdout.trim()) {
+            "created" -> DirectoryCreateResult.Created
+            "exists" -> DirectoryCreateResult.AlreadyExists
+            else -> DirectoryCreateResult.Failed
+        }
     }
 
     private fun normalizeRelativePath(raw: String): String? {

@@ -1,5 +1,6 @@
 package com.storage.redirect.x.ui
 
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.runtime.MutableState
 import androidx.compose.foundation.layout.padding
 import androidx.lifecycle.ViewModelStore
@@ -25,7 +26,22 @@ import org.robolectric.annotation.*
 class FileMonitorRenderTest {
     @Test
     @Suppress("UNCHECKED_CAST")
-    fun directoryPickerKeepsSelectionAndConfirmsAtBottomRight() {
+    fun selectAllKeepsSelectionsOutsideTheVisibleFolders() {
+        val state = com.storage.redirect.x.ui.page.pathbrowser.PathBrowserState(0, null, true, true)
+        val field = state.javaClass.getDeclaredField("directories\$delegate").apply { isAccessible = true }
+        (field.get(state) as MutableState<List<String>>).value = listOf(".hidden", "Download")
+        state.togglePath("Elsewhere/saved")
+        state.togglePath("Download")
+        state.query = ".hidden"
+        state.toggleVisibleSelection()
+        assertEquals(setOf("Elsewhere/saved", "Download", ".hidden"), state.selectedPaths)
+        state.toggleVisibleSelection()
+        assertEquals(setOf("Elsewhere/saved", "Download"), state.selectedPaths)
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun directoryPickerKeepsSelectionAndConfirmsAtTopRight() {
         val state = com.storage.redirect.x.ui.page.pathbrowser.PathBrowserState(0, null, true, true)
         fun <T> setField(name: String, value: T) {
             val field = state.javaClass.getDeclaredField(name + "\$delegate").apply { isAccessible = true }
@@ -35,11 +51,16 @@ class FileMonitorRenderTest {
         setField("isLoading", false)
         state.togglePath("Download")
         var confirmed = emptyList<String>()
+        var creationAttempts = 0
+        val repository = com.storage.redirect.x.data.repository.PathBrowserRepository {
+            creationAttempts++
+            com.storage.redirect.x.data.service.CommandResult(0, if (creationAttempts == 1) "exists" else "created", "")
+        }
         RenderScene {
             AppTheme(AppThemeSettings(colorMode = ColorMode.LIGHT)) {
                 com.storage.redirect.x.ui.page.pathbrowser.BrowserScaffold(
-                    "选择目录", {}, {}, androidx.compose.ui.Modifier,
-                    bottomBar = { com.storage.redirect.x.ui.page.pathbrowser.BrowserSelectionDock(state) { confirmed = state.confirmedPaths() } },
+                    title = "选择目录", state = state, onBack = {},
+                    onConfirm = { confirmed = state.confirmedPaths() }, modifier = androidx.compose.ui.Modifier,
                 ) { padding ->
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier
                         .then(androidx.compose.ui.Modifier.padding(padding))) {
@@ -48,22 +69,47 @@ class FileMonitorRenderTest {
                         com.storage.redirect.x.ui.page.pathbrowser.BrowserDirectoryList(state, androidx.compose.ui.Modifier.weight(1f))
                     }
                 }
+                com.storage.redirect.x.ui.page.pathbrowser.PathBrowserDialogs(state, repository)
             }
         }.use { scene ->
             scene.frames()
+            verifyFolderCreation(scene, state)
+            assertEquals(2, creationAttempts)
             scene.tapTag("browser_select_Pictures")
             scene.frames()
             assertEquals(setOf("Download", "Pictures"), state.selectedPaths)
             val confirm = scene.tag("directory_confirm").boundsInRoot
             assertTrue(confirm.left > 700f)
-            assertTrue(confirm.top > 1800f)
-            scene.capture("directory-picker-miuix")
+            assertTrue(confirm.top < 250f)
+            val actions = listOf("browser_sort", "browser_new_folder", "browser_select_all", "directory_confirm")
+                .map { scene.tag(it).boundsInRoot }
+            actions.zipWithNext().forEach { (left, right) ->
+                assertTrue(left.right <= right.left)
+                assertTrue(kotlin.math.abs(left.center.y - right.center.y) < 2f)
+            }
+            val mode = scene.tag("browser_rule_mode").boundsInRoot
+            assertTrue(mode.top >= confirm.bottom)
+            assertTrue(mode.bottom < scene.tag("browser_directory_Download").boundsInRoot.top)
+            assertTrue(scene.nodes().none { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag) == "browser_full_path" })
+            assertTrue(scene.texts("文件夹 · 4").isEmpty())
+            assertTrue(scene.texts("名称升序").isEmpty())
+            assertTrue(scene.texts(".hidden").isNotEmpty())
+            scene.tapTag("browser_select_all")
+            assertEquals(4, state.selectedPaths.size)
+            scene.tapTag("browser_select_all")
+            assertTrue(state.selectedPaths.isEmpty())
+            scene.tapTag("browser_select_Download")
+            scene.tapTag("browser_select_Pictures")
+            scene.capture("directory-picker-actions")
             scene.tapTag("browser_sort")
             assertTrue(scene.texts("名称降序").isNotEmpty())
             scene.tapText("名称降序")
             assertTrue(state.isDescending)
+            scene.tapText("排除目录")
+            scene.frames()
+            assertTrue(state.isExcludeMode)
             scene.tapTag("directory_confirm")
-            assertEquals(setOf("Download", "Pictures"), confirmed.toSet())
+            assertEquals(setOf("!Download", "!Pictures"), confirmed.toSet())
         }
     }
 
@@ -78,8 +124,8 @@ class FileMonitorRenderTest {
         RenderScene {
             AppTheme(AppThemeSettings(colorMode = ColorMode.DARK)) {
                 com.storage.redirect.x.ui.page.pathbrowser.BrowserScaffold(
-                    "选择目录", {}, {}, androidx.compose.ui.Modifier,
-                    bottomBar = { com.storage.redirect.x.ui.page.pathbrowser.BrowserSelectionDock(state) {} },
+                    title = "选择目录", state = state, onBack = {},
+                    onConfirm = {}, modifier = androidx.compose.ui.Modifier,
                 ) { padding ->
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(padding)) {
                         com.storage.redirect.x.ui.page.pathbrowser.BrowserBreadcrumbs(state)
@@ -91,8 +137,24 @@ class FileMonitorRenderTest {
         }.use { scene ->
             scene.frames()
             assertTrue(scene.texts("空目录").isNotEmpty())
-            scene.capture("directory-picker-empty-dark")
+            scene.capture("directory-picker-actions-empty-dark")
         }
+    }
+
+    private fun verifyFolderCreation(scene: RenderScene, state: com.storage.redirect.x.ui.page.pathbrowser.PathBrowserState) {
+        scene.tapTag("browser_new_folder")
+        scene.frames(80)
+        val edit = scene.tag("browser_folder_name")
+        requireNotNull(edit.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.SetText)?.action)
+            .invoke(androidx.compose.ui.text.AnnotatedString("New folder"))
+        scene.frames()
+        scene.tapTag("browser_create_confirm")
+        assertTrue(scene.texts("已存在同名文件或文件夹").isNotEmpty())
+        assertEquals(0, state.reloadKey)
+        scene.tapTag("browser_create_confirm")
+        assertNull(state.dialog)
+        assertEquals(1, state.reloadKey)
+        assertEquals("", state.query)
     }
 
     @Test

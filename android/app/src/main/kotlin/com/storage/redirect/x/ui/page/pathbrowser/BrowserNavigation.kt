@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import com.storage.redirect.x.R
 import com.storage.redirect.x.ui.component.SrxScaffold
-import com.storage.redirect.x.ui.component.SrxSmallTopAppBar
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
@@ -28,25 +27,13 @@ import top.yukonga.miuix.kmp.squircle.squircleSurface
 
 @Composable
 internal fun BrowserScaffold(
-    title: String, onBack: () -> Unit, onSettings: () -> Unit, modifier: Modifier,
-    bottomBar: @Composable () -> Unit, content: @Composable (PaddingValues) -> Unit,
+    title: String, state: PathBrowserState, onBack: () -> Unit,
+    onConfirm: () -> Unit, modifier: Modifier,
+    content: @Composable (PaddingValues) -> Unit,
 ) {
     SrxScaffold(
         modifier = modifier.imePadding(),
-        topBar = {
-            SrxSmallTopAppBar(title = title,
-                navigationIcon = {
-                    BrowserIconButton(onBack, Modifier.testTag("browser_back")) {
-                        Icon(MiuixIcons.Back, stringResource(R.string.browser_back))
-                    }
-                },
-                actions = {
-                    BrowserIconButton(onSettings, Modifier.testTag("browser_settings")) {
-                        Icon(MiuixIcons.More, stringResource(R.string.browser_settings))
-                    }
-                })
-        },
-        bottomBar = bottomBar,
+        topBar = { BrowserSelectionHeader(title, state, onBack, onConfirm) },
         content = content,
     )
 }
@@ -70,9 +57,6 @@ internal fun BrowserBreadcrumbs(state: PathBrowserState) {
                     state.navigateTo(parts.take(index + 1).joinToString("/"))
                 }
             }
-        }
-        BrowserIconButton({ state.dialog = BrowserDialog.Location }, Modifier.testTag("browser_full_path")) {
-            Icon(MiuixIcons.Info, stringResource(R.string.browser_full_path), Modifier.size(20.dp))
         }
     }
 }
