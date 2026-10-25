@@ -33,6 +33,9 @@ pub fn normalize(path: &str) -> String {
 }
 
 pub fn resolve_user_path(path: &str, user_id: i32) -> String {
+    if let Some(suffix) = path.strip_prefix("/data/data/") {
+        return format!("/data/user/{user_id}/{suffix}");
+    }
     if user_id == 0 {
         return path.to_string();
     }
@@ -48,6 +51,7 @@ pub fn resolve_user_path(path: &str, user_id: i32) -> String {
     }
 
     resolved = resolved.replace("/data/user/0/", &format!("/data/user/{}/", user_str));
+    resolved = resolved.replace("/data/user_de/0/", &format!("/data/user_de/{}/", user_str));
     resolved
 }
 
@@ -57,14 +61,33 @@ pub fn resolve_placeholders(path: &str, app_data_dir: &str, redirect_target: &st
     if !app_data_dir.is_empty() {
         resolved = resolved.replace("${APP_DATA_DIR}", app_data_dir);
         resolved = resolved.replace("$APP_DATA_DIR", app_data_dir);
+        resolved = resolved.replace("{app_data_dir}", app_data_dir);
+        resolved = resolved.replace(
+            "{package_name}",
+            app_data_dir.rsplit('/').next().unwrap_or_default(),
+        );
     }
 
     if !redirect_target.is_empty() {
         resolved = resolved.replace("${REDIRECT_TARGET}", redirect_target);
         resolved = resolved.replace("$REDIRECT_TARGET", redirect_target);
+        resolved = resolved.replace("{redirect_target}", redirect_target);
     }
 
     resolved
+}
+
+pub fn has_path_placeholder(path: &str) -> bool {
+    [
+        "${APP_DATA_DIR}",
+        "$APP_DATA_DIR",
+        "{app_data_dir}",
+        "${REDIRECT_TARGET}",
+        "$REDIRECT_TARGET",
+        "{redirect_target}",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix))
 }
 
 pub fn starts_with(path: &str, prefix: &str) -> bool {

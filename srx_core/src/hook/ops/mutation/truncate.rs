@@ -27,6 +27,10 @@ pub unsafe extern "C" fn hooked_ftruncate(fd: c_int, length: off_t) -> c_int {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
             }
 
+            if crate::hook::readonly::denies_fd(hub, fd) {
+                return -1;
+            }
+
             handle_ftruncate_fd(hub, "ftruncate", fd, length, || {
                 runtime::call_prev(
                     self_ptr,
@@ -59,6 +63,10 @@ pub unsafe extern "C" fn hooked_ftruncate64(fd: c_int, length: off_t) -> c_int {
             hub.increment_open_calls();
             if runtime::should_resolve_caller_context(hub) {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_fd(hub, fd) {
+                return -1;
             }
 
             handle_ftruncate_fd(hub, "ftruncate64", fd, length, || {
@@ -94,6 +102,10 @@ pub unsafe extern "C" fn hooked_futimens(fd: c_int, times: *const timespec) -> c
             hub.increment_open_calls();
             if runtime::should_resolve_caller_context(hub) {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_fd(hub, fd) {
+                return -1;
             }
 
             handle_futimens_fd(hub, "futimens", fd, times, || {

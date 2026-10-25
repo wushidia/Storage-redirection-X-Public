@@ -34,6 +34,10 @@ pub unsafe extern "C" fn hooked_mknod(
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
             }
 
+            if crate::hook::readonly::denies_at(hub, libc::AT_FDCWD, pathname) {
+                return -1;
+            }
+
             handle_mknod_like(hub, "mknod", pathname, mode, |call_path| {
                 runtime::call_prev(
                     self_ptr,
@@ -76,6 +80,10 @@ pub unsafe extern "C" fn hooked_mknodat(
             hub.increment_mkdir_calls();
             if runtime::should_resolve_caller_context(hub) {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_at(hub, dirfd, pathname) {
+                return -1;
             }
 
             handle_mknod_like(hub, "mknodat", pathname, mode, |call_path| {

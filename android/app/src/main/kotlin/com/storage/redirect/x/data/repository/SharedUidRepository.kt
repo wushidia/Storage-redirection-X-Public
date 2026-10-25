@@ -1,69 +1,24 @@
 package com.storage.redirect.x.data.repository
 
-import com.storage.redirect.x.data.service.RootService
-import com.storage.redirect.x.util.Paths
+import com.storage.redirect.x.data.model.AppInfo
 
-// 共享 UID 仓库：读取系统代写进程的 UID 映射
+// 共享 UID 必须来自相同 Android 用户的 PM 查询结果。
 class SharedUidRepository {
+    private val groupsByUser = mutableMapOf<Int, Map<String, List<String>>>()
 
-    // 缓存：UID -> 包名列表
-    private var uidToPackages: Map<Int, List<String>> = emptyMap()
-
-    // 缓存：包名 -> UID
-    private var packageToUid: Map<String, Int> = emptyMap()
-
-    // 加载共享 UID 映射
-    suspend fun load(): Boolean {
-        if (!RootService.isRootAvailable()) return false
-
-        val result = RootService.runCommand("cat ${Paths.SYSTEM_WRITER_UIDS_FILE} 2>/dev/null")
-        if (!result.isSuccess) return false
-
-        val uidMap = mutableMapOf<Int, MutableList<String>>()
-        val pkgMap = mutableMapOf<String, Int>()
-
-        result.stdout.lines().forEach { line ->
-            val trimmed = line.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
-
-            val parts = trimmed.split(":")
-            if (parts.size != 2) return@forEach
-
-            val packageName = parts[0].trim()
-            val uid = parts[1].trim().toIntOrNull() ?: return@forEach
-
-            pkgMap[packageName] = uid
-            uidMap.getOrPut(uid) { mutableListOf() }.add(packageName)
+    fun update(userId: Int, apps: List<AppInfo>) {
+        val groups = apps.filter { it.uid >= 0 && it.userId == userId }
+            .groupBy { it.uid }.values.filter { it.size > 1 }
+        groupsByUser[userId] = buildMap {
+            for (group in groups) {
+                val names = group.map { it.packageName }.sorted()
+                names.forEach { put(it, names) }
+            }
         }
-
-        // 过滤：只保留有 >= 2 个包的 UID（真正的共享 UID）
-        uidToPackages = uidMap.filter { it.value.size >= 2 }
-            .mapValues { it.value.sorted() }
-        packageToUid = pkgMap
-
-        return true
     }
 
-    // 获取与指定包名共享 UID 的所有包名（不含自身）
-    fun getSharedPackages(packageName: String): List<String> {
-        val uid = packageToUid[packageName] ?: return emptyList()
-        val packages = uidToPackages[uid] ?: return emptyList()
-        return packages.filter { it != packageName }
-    }
+    fun getSharedPackages(packageName: String, userId: Int): List<String> =
+        groupsByUser[userId]?.get(packageName).orEmpty().filter { it != packageName }
 
-    // 获取与指定包名共享 UID 的所有包名（含自身）
-    fun getAllSharedPackages(packageName: String): List<String> {
-        val uid = packageToUid[packageName] ?: return emptyList()
-        return uidToPackages[uid] ?: emptyList()
-    }
-
-    // 全部共享 UID 组的包名集合，沿用已加载映射
-    fun allSharedUidPackages(): Set<String> =
-        uidToPackages.values.flatten().toSet()
-
-    // 判断包名是否属于共享 UID 组
-    fun isSharedUidPackage(packageName: String): Boolean {
-        val uid = packageToUid[packageName] ?: return false
-        return uidToPackages.containsKey(uid)
-    }
+    fun allSharedUidPackages(userId: Int): Set<String> = groupsByUser[userId]?.keys.orEmpty()
 }

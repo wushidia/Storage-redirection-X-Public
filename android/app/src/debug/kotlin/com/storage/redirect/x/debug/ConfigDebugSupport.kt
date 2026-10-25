@@ -24,8 +24,8 @@ internal data class DebugConfigTargets(
 
 internal suspend fun Context.loadDebugConfigTargets(packageName: String, userId: Int): DebugConfigTargets {
     val sharedRepository = SharedUidRepository()
-    check(sharedRepository.load()) { "Shared UID map unavailable (root required)" }
-    val packageNames = linkedSetOf(packageName).apply { addAll(sharedRepository.getSharedPackages(packageName)) }
+    sharedRepository.update(userId, com.storage.redirect.x.data.provider.AppListProvider(this).getInstalledApps(userId))
+    val packageNames = linkedSetOf(packageName).apply { addAll(sharedRepository.getSharedPackages(packageName, userId)) }
     for (name in packageNames) {
         debugPackageName(name)
         val content = readDebugConfigFile(Paths.appConfigFile(name)) ?: continue

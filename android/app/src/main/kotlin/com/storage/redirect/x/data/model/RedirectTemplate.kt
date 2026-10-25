@@ -12,6 +12,9 @@ data class RedirectTemplate(
     val name: String,
     val allowedRealPaths: ImmutableList<String> = persistentListOf(),
     val pathMappings: ImmutableList<StoragePathMapping> = persistentListOf(),
+    val isMappingModeOnly: Boolean = false,
+    val sandboxedPaths: ImmutableList<String> = persistentListOf(),
+    val readOnlyPaths: ImmutableList<String> = persistentListOf(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = createdAt,
 ) {
@@ -32,6 +35,8 @@ data class RedirectTemplate(
             name = name.trim(),
             allowedRealPaths = cleanedPaths.toImmutableList(),
             pathMappings = mappingByRequest.values.sortedBy { it.requestPath }.toImmutableList(),
+            sandboxedPaths = sandboxedPaths.mapNotNull(RedirectConfig::normalizeAllowedPath).distinct().sorted().toImmutableList(),
+            readOnlyPaths = readOnlyPaths.mapNotNull(RedirectConfig::normalizePolicyPath).distinct().sorted().toImmutableList(),
         )
     }
 
@@ -41,6 +46,9 @@ data class RedirectTemplate(
         obj.addProperty("name", name)
         obj.addProperty("created_at", createdAt)
         obj.addProperty("updated_at", updatedAt)
+        if (isMappingModeOnly) obj.addProperty("mapping_mode_only", true)
+        if (sandboxedPaths.isNotEmpty()) obj.add("sandboxed_paths", JsonArray().apply { sandboxedPaths.forEach { add(it) } })
+        if (readOnlyPaths.isNotEmpty()) obj.add("read_only_paths", JsonArray().apply { readOnlyPaths.forEach { add(it) } })
 
         val paths = JsonArray()
         allowedRealPaths.forEach { paths.add(it) }
@@ -83,6 +91,9 @@ data class RedirectTemplate(
             return RedirectTemplate(
                     id = id,
                     name = name,
+                    isMappingModeOnly = json.get("mapping_mode_only")?.asBoolean ?: false,
+                    sandboxedPaths = json.getAsJsonArray("sandboxed_paths")?.map { it.asString }?.toImmutableList() ?: persistentListOf(),
+                    readOnlyPaths = json.getAsJsonArray("read_only_paths")?.map { it.asString }?.toImmutableList() ?: persistentListOf(),
                     allowedRealPaths = allowedRealPaths.toImmutableList(),
                     pathMappings = mappings.toImmutableList(),
                     createdAt = json.get("created_at")?.asLong ?: System.currentTimeMillis(),

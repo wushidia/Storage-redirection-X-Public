@@ -100,6 +100,14 @@ impl<'a> WriterFlow<'a> {
         }
     }
 
+    fn now_ms(&self) -> i64 {
+        if self.perf_started_ms == 0 {
+            0
+        } else {
+            paths::monotonic_ms()
+        }
+    }
+
     fn execute(&mut self) -> RedirectDecision {
         self.reload_config();
         if let Some(decision) = self.check_empty_path() {
@@ -136,9 +144,9 @@ impl<'a> WriterFlow<'a> {
     }
 
     fn reload_config(&mut self) {
-        let reload_started_ms = paths::monotonic_ms();
+        let reload_started_ms = self.now_ms();
         crate::hook::refresh_runtime_config_throttled();
-        self.reload_ms = paths::monotonic_ms().saturating_sub(reload_started_ms);
+        self.reload_ms = self.now_ms().saturating_sub(reload_started_ms);
     }
 
     fn check_empty_path(&mut self) -> Option<RedirectDecision> {
@@ -163,7 +171,7 @@ impl<'a> WriterFlow<'a> {
     }
 
     fn resolve_caller(&mut self) {
-        let caller_started_ms = paths::monotonic_ms();
+        let caller_started_ms = self.now_ms();
         self.effective_caller_uid = self.hub.get_current_caller_uid();
         let original_caller_uid = self.effective_caller_uid;
         self.effective_caller_package = self.hub.get_current_caller_package();
@@ -198,7 +206,7 @@ impl<'a> WriterFlow<'a> {
                 .filter(|pkg| !policy::is_system_writer_package(pkg))
                 .collect();
             if let Some(pkg) = crate::monitor::infer_caller_package_by_stack(&candidates) {
-                let inferred_uid = policy::get_uid_for_package(&pkg);
+                let inferred_uid = policy::get_uid_for_package(&pkg, self.user_id);
                 if inferred_uid >= writer::ANDROID_APP_UID_START {
                     self.effective_caller_uid = inferred_uid;
                 }
@@ -213,7 +221,7 @@ impl<'a> WriterFlow<'a> {
             }
         }
 
-        self.caller_ms = paths::monotonic_ms().saturating_sub(caller_started_ms);
+        self.caller_ms = self.now_ms().saturating_sub(caller_started_ms);
     }
 
     fn check_caller_empty(&mut self) -> Option<RedirectDecision> {
@@ -249,14 +257,14 @@ impl<'a> WriterFlow<'a> {
     }
 
     fn check_enabled(&mut self) -> Option<RedirectDecision> {
-        let enable_started_ms = paths::monotonic_ms();
+        let enable_started_ms = self.now_ms();
         let config = SettingsHub::instance();
         self.enabled_in_memory =
             config.should_redirect(&self.effective_caller_package, self.effective_caller_uid);
         let raw_enabled_state =
             config.get_user_enabled_in_raw_config(&self.effective_caller_package, self.user_id);
         self.enabled_in_raw = raw_enabled_state == RawUserEnabledState::Enabled;
-        self.enable_ms = paths::monotonic_ms().saturating_sub(enable_started_ms);
+        self.enable_ms = self.now_ms().saturating_sub(enable_started_ms);
         if raw_enabled_state == RawUserEnabledState::Disabled
             || (!self.enabled_in_memory && !self.enabled_in_raw)
         {
@@ -287,12 +295,12 @@ impl<'a> WriterFlow<'a> {
     }
 
     fn resolve_mappings(&mut self) {
-        let mapping_started_ms = paths::monotonic_ms();
+        let mapping_started_ms = self.now_ms();
         self.caller_mappings =
             writer::get_caller_mappings(&self.effective_caller_package, self.effective_caller_uid);
         self.mapped_path =
             writer::map_path_by_caller_mappings(&self.resolved_path, &self.caller_mappings);
-        self.mapping_ms = paths::monotonic_ms().saturating_sub(mapping_started_ms);
+        self.mapping_ms = self.now_ms().saturating_sub(mapping_started_ms);
     }
 
     fn check_mapping(&mut self) -> Option<RedirectDecision> {
@@ -340,7 +348,7 @@ impl<'a> WriterFlow<'a> {
     }
 
     fn classify_allow(&mut self) -> Option<RedirectDecision> {
-        let allow_started_ms = paths::monotonic_ms();
+        let allow_started_ms = self.now_ms();
         match writer::classify_path_by_caller_real_paths(
             &self.resolved_path,
             &self.effective_caller_package,
@@ -355,7 +363,7 @@ impl<'a> WriterFlow<'a> {
                 );
             }
             writer::CallerRealPathMatch::Allowed => {
-                self.allow_ms = paths::monotonic_ms().saturating_sub(allow_started_ms);
+                self.allow_ms = self.now_ms().saturating_sub(allow_started_ms);
                 let allowed_count = WRITER_ALLOWED_LOG_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
                 if should_log_step(allowed_count, WRITER_ALLOWED_LOG_STEP) {
                     log::debug!(
@@ -374,12 +382,12 @@ impl<'a> WriterFlow<'a> {
             }
             writer::CallerRealPathMatch::None => {}
         }
-        self.allow_ms = paths::monotonic_ms().saturating_sub(allow_started_ms);
+        self.allow_ms = self.now_ms().saturating_sub(allow_started_ms);
         None
     }
 
     fn resolve_target(&mut self) -> Option<RedirectDecision> {
-        self.fallback_started_ms = paths::monotonic_ms();
+        self.fallback_started_ms = self.now_ms();
         self.redirect_target = writer::resolve_system_writer_redirect_target(
             &self.effective_caller_package,
             self.effective_caller_uid,
@@ -396,7 +404,7 @@ impl<'a> WriterFlow<'a> {
             self.effective_caller_uid,
             self.pathname,
         );
-        self.fallback_ms = paths::monotonic_ms().saturating_sub(self.fallback_started_ms);
+        self.fallback_ms = self.now_ms().saturating_sub(self.fallback_started_ms);
         let decision = RedirectDecision {
             action: RedirectAction::Allow,
             new_path: String::new(),
@@ -411,7 +419,7 @@ impl<'a> WriterFlow<'a> {
             self.user_id,
         );
         if fallback_path.is_empty() || fallback_path == self.resolved_path {
-            self.fallback_ms = paths::monotonic_ms().saturating_sub(self.fallback_started_ms);
+            self.fallback_ms = self.now_ms().saturating_sub(self.fallback_started_ms);
             let decision = RedirectDecision {
                 action: RedirectAction::Allow,
                 new_path: String::new(),
@@ -430,7 +438,7 @@ impl<'a> WriterFlow<'a> {
             &self.resolved_path,
             &new_path,
         );
-        self.fallback_ms = paths::monotonic_ms().saturating_sub(self.fallback_started_ms);
+        self.fallback_ms = self.now_ms().saturating_sub(self.fallback_started_ms);
         let decision = RedirectDecision {
             action: RedirectAction::Redirect,
             new_path,
@@ -457,7 +465,7 @@ impl<'a> WriterFlow<'a> {
             mapping_ms: self.mapping_ms,
             allow_ms: self.allow_ms,
             fallback_ms: self.fallback_ms,
-            total_ms: paths::monotonic_ms().saturating_sub(self.perf_started_ms),
+            total_ms: self.now_ms().saturating_sub(self.perf_started_ms),
             decision: &decision,
         });
         if log_thumbnail {

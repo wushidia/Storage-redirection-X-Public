@@ -3,6 +3,7 @@ mod alias;
 mod apply;
 mod core;
 mod map;
+mod rules;
 
 pub struct MountPlanner {
     should_unshare: bool,

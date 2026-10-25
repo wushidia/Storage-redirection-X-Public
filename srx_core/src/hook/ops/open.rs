@@ -166,6 +166,12 @@ pub unsafe extern "C" fn hooked_open(pathname: *const c_char, flags: c_int, mode
                 }
             }
 
+            if monitor::has_write_intent_flags(flags)
+                && crate::hook::readonly::denies_write(hub, &path_text)
+            {
+                return -1;
+            }
+
             runtime::ensure_redirect_parent_directory(
                 "open",
                 &path_text,
@@ -347,6 +353,12 @@ where
         }
     };
 
+    if monitor::has_write_intent_flags(flags)
+        && crate::hook::readonly::denies_write(hub, path_for_decision.as_ref())
+    {
+        return -1;
+    }
+
     runtime::ensure_redirect_parent_directory(
         op_name,
         path_for_decision.as_ref(),
@@ -454,6 +466,10 @@ pub unsafe extern "C" fn hooked_creat(pathname: *const c_char, mode: mode_t) -> 
                 if redirect_result.is_redirect() {
                     final_path = Cow::Owned(redirect_result.new_path);
                 }
+            }
+
+            if crate::hook::readonly::denies_write(hub, &path_text) {
+                return -1;
             }
 
             let result = if let Ok(c_path) = CString::new(final_path.as_ref()) {

@@ -8,6 +8,9 @@ pub struct CompanionMountRequest {
     pub app_data_dir: String,
     pub redirect_target: String,
     pub allowed_real_paths: Vec<String>,
+    pub excluded_real_paths: Vec<String>,
+    pub sandboxed_paths: Vec<String>,
+    pub read_only_paths: Vec<String>,
     pub path_mappings: Vec<PathMapping>,
     pub is_mapping_mode_only: bool,
 }
@@ -41,6 +44,9 @@ pub fn parse_companion_mount_request(payload: &str) -> Result<CompanionMountRequ
         .unwrap_or(false);
 
     request.allowed_real_paths = parse_allowed_real_paths(value.get("allowed_real_paths"));
+    request.excluded_real_paths = parse_allowed_real_paths(value.get("excluded_real_paths"));
+    request.sandboxed_paths = parse_allowed_real_paths(value.get("sandboxed_paths"));
+    request.read_only_paths = parse_allowed_real_paths(value.get("read_only_paths"));
     request.path_mappings = parse_path_mappings(value.get("path_mappings"));
 
     if request.pid <= 0 || request.uid < 0 || request.package_name.is_empty() {

@@ -23,7 +23,7 @@ const SYSTEM_WRITER_UID_FILE_CANDIDATES: [&str; 2] = [
 
 #[derive(Default)]
 struct SharedUidState {
-    uid_by_package: HashMap<String, i32>,
+    uid_by_package: HashMap<String, HashMap<i32, i32>>,
     packages_by_uid: HashMap<i32, Vec<String>>,
     system_writer_shared_uids: HashSet<i32>,
     last_fingerprint: u64,
@@ -77,21 +77,35 @@ pub fn get_system_writer_name(_package_name: &str) -> &'static str {
 
 // 指纹变更时重新加载
 pub fn refresh_shared_uid_cache() {
+    let fingerprint = compute_uid_file_fingerprint();
+    let previous = {
+        let state = SHARED_UID_STATE
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if state.is_loaded && fingerprint == state.last_fingerprint {
+            return;
+        }
+        state.last_fingerprint
+    };
+    let mut loaded = SharedUidState::default();
+    load_shared_uid_cache(&mut loaded, fingerprint);
     let mut state = SHARED_UID_STATE
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let fingerprint = compute_uid_file_fingerprint();
-    if state.is_loaded && fingerprint == state.last_fingerprint {
-        return;
+    if state.last_fingerprint == previous {
+        *state = loaded;
     }
-    load_shared_uid_cache(&mut state, fingerprint);
 }
 
-pub fn get_shared_group_members(package_name: &str) -> Vec<String> {
+pub fn get_shared_group_members(package_name: &str, user_id: i32) -> Vec<String> {
     let state = SHARED_UID_STATE
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let Some(uid) = state.uid_by_package.get(package_name) else {
+    let Some(uid) = state
+        .uid_by_package
+        .get(package_name)
+        .and_then(|users| users.get(&user_id))
+    else {
         return vec![];
     };
     if !is_shared_uid(*uid, &state.packages_by_uid) {
@@ -100,11 +114,15 @@ pub fn get_shared_group_members(package_name: &str) -> Vec<String> {
     state.packages_by_uid.get(uid).cloned().unwrap_or_default()
 }
 
-pub fn is_shared_group_package(package_name: &str) -> bool {
+pub fn is_shared_group_package(package_name: &str, user_id: i32) -> bool {
     let state = SHARED_UID_STATE
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let Some(uid) = state.uid_by_package.get(package_name) else {
+    let Some(uid) = state
+        .uid_by_package
+        .get(package_name)
+        .and_then(|users| users.get(&user_id))
+    else {
         return false;
     };
     is_shared_uid(*uid, &state.packages_by_uid)
@@ -120,7 +138,7 @@ pub fn get_packages_for_uid(uid: i32) -> Vec<String> {
     state.packages_by_uid.get(&uid).cloned().unwrap_or_default()
 }
 
-pub fn get_uid_for_package(package_name: &str) -> i32 {
+pub fn get_uid_for_package(package_name: &str, user_id: i32) -> i32 {
     if package_name.is_empty() {
         return -1;
     }
@@ -130,6 +148,7 @@ pub fn get_uid_for_package(package_name: &str) -> i32 {
     state
         .uid_by_package
         .get(package_name)
+        .and_then(|users| users.get(&user_id))
         .copied()
         .unwrap_or(-1)
 }
@@ -232,15 +251,23 @@ fn load_shared_uid_cache(state: &mut SharedUidState, fingerprint: u64) {
         return;
     };
 
-    let mut uid_by_package = HashMap::new();
+    *state = parse_uid_index(BufReader::new(file));
+    state.last_fingerprint = fingerprint;
+    state.is_loaded = true;
+}
+
+fn parse_uid_index(reader: impl BufRead) -> SharedUidState {
+    let mut uid_by_package: HashMap<String, HashMap<i32, i32>> = HashMap::new();
     let mut packages_by_uid: HashMap<i32, Vec<String>> = HashMap::new();
 
-    let reader = BufReader::new(file);
     for line in reader.lines().map_while(Result::ok) {
         let Some((package, uid)) = parse_line(&line) else {
             continue;
         };
-        uid_by_package.insert(package.clone(), uid);
+        uid_by_package
+            .entry(package.clone())
+            .or_default()
+            .insert(crate::platform::user_id_from_uid(uid), uid);
         packages_by_uid.entry(uid).or_default().push(package);
     }
 
@@ -259,16 +286,31 @@ fn load_shared_uid_cache(state: &mut SharedUidState, fingerprint: u64) {
         }
     }
 
-    state.uid_by_package = uid_by_package;
-    state.packages_by_uid = packages_by_uid;
-    state.system_writer_shared_uids = system_writer_shared_uids;
-    state.last_fingerprint = fingerprint;
-    state.is_loaded = true;
+    SharedUidState {
+        uid_by_package,
+        packages_by_uid,
+        system_writer_shared_uids,
+        ..SharedUidState::default()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uid_index_keeps_the_same_package_separate_across_users() {
+        let state = parse_uid_index(std::io::Cursor::new(
+            "example.app:10001\nexample.app:1010001\nexample.peer:1010001\n",
+        ));
+        assert_eq!(state.uid_by_package["example.app"][&0], 10001);
+        assert_eq!(state.uid_by_package["example.app"][&10], 1010001);
+        assert_eq!(state.packages_by_uid[&10001], ["example.app"]);
+        assert_eq!(
+            state.packages_by_uid[&1010001],
+            ["example.app", "example.peer"]
+        );
+    }
 
     #[test]
     fn file_monitor_ui_detects_system_and_oem_file_shells() {

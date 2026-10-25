@@ -8,6 +8,7 @@ mod media_fuse;
 mod monitor;
 mod ops;
 mod path;
+mod readonly;
 mod reload;
 mod runtime;
 pub mod stats;
@@ -34,6 +35,15 @@ pub(crate) fn refresh_runtime_config_throttled() {
 
     let _guard = context::ReentryGuard::enter();
     let _ = reload::poll_or_check_throttled();
+}
+
+pub(crate) fn refresh_runtime_config_after_disk_change() {
+    if context::ReentryGuard::is_reentrant() {
+        reload::force_after_disk_change();
+        return;
+    }
+    let _guard = context::ReentryGuard::enter();
+    reload::force_after_disk_change();
 }
 
 #[unsafe(no_mangle)]

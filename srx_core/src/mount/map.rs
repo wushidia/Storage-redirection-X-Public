@@ -1,146 +1,233 @@
 use super::MountPlanner;
-use crate::domain::PathMapping;
+use crate::domain::{MappingError, PathMapping, compose_mount_mappings, map_path_once};
 use crate::platform::{fs, paths};
+use std::fs as std_fs;
+use std::path::Path;
+
+const MAPPING_EXPANSION_LIMIT: usize = 512;
 
 impl MountPlanner {
     pub(super) fn resolve_path_mappings(
         &self,
-        path_mappings: &[PathMapping],
-        storage_path: &str,
+        mappings: &[PathMapping],
+        storage_root: &str,
     ) -> Vec<PathMapping> {
-        let mut resolved = Vec::with_capacity(path_mappings.len());
-
-        for mapping in path_mappings {
-            let mut current_path = self.resolve_user_path(
-                &self.resolve_placeholders(&self.normalize_path(&mapping.request_path)),
-            );
-            let mut target_path = self.resolve_user_path(
-                &self.resolve_placeholders(&self.normalize_path(&mapping.final_path)),
-            );
-
-            if current_path.is_empty() || target_path.is_empty() {
-                continue;
+        match self.resolve_mapping_plan(mappings, storage_root) {
+            Ok(plan) => plan,
+            Err(error) => {
+                log::error!("mapping plan failed: {:?}", error);
+                Vec::new()
             }
-            if paths::has_unsafe_segments(&current_path) || paths::has_unsafe_segments(&target_path)
-            {
-                continue;
-            }
-
-            if !paths::is_absolute(&current_path) {
-                current_path = self.normalize_path(&paths::join(storage_path, &current_path));
-            }
-            if !paths::is_absolute(&target_path) {
-                target_path = self.normalize_path(&paths::join(storage_path, &target_path));
-            }
-
-            if current_path == storage_path || target_path == storage_path {
-                log::warn!(
-                    "skip map (whole storage not supported): cur={} tgt={}",
-                    current_path,
-                    target_path
-                );
-                continue;
-            }
-
-            if !paths::starts_with(&current_path, &format!("{}/", storage_path))
-                || !paths::starts_with(&target_path, &format!("{}/", storage_path))
-            {
-                log::warn!(
-                    "skip map (not under storage): cur={} tgt={}",
-                    current_path,
-                    target_path
-                );
-                continue;
-            }
-
-            if current_path == target_path {
-                continue;
-            }
-
-            resolved.push(PathMapping::new(current_path, target_path));
         }
-
-        resolved.sort_by(|a, b| {
-            if a.request_path.len() != b.request_path.len() {
-                a.request_path.len().cmp(&b.request_path.len())
-            } else {
-                a.request_path.cmp(&b.request_path)
-            }
-        });
-
-        resolved
     }
 
+    pub(super) fn resolve_mapping_plan(
+        &self,
+        mappings: &[PathMapping],
+        storage_root: &str,
+    ) -> Result<Vec<PathMapping>, MappingError> {
+        let mut concrete = Vec::new();
+        for mapping in mappings {
+            let resolve = |raw: &str| {
+                let path =
+                    self.resolve_user_path(&self.resolve_placeholders(&paths::normalize(raw)));
+                if paths::is_absolute(&path) {
+                    path
+                } else {
+                    paths::join(storage_root, &path)
+                }
+            };
+            let mapping =
+                PathMapping::new(resolve(&mapping.request_path), resolve(&mapping.final_path));
+            if paths::has_unsafe_segments(&mapping.request_path)
+                || paths::has_unsafe_segments(&mapping.final_path)
+                || mapping.request_path == storage_root
+                || mapping.final_path == storage_root
+            {
+                continue;
+            }
+            if !mapping.request_path.contains(['*', '?']) {
+                concrete.push(mapping);
+                continue;
+            }
+            let shared = mapping
+                .request_path
+                .starts_with(&format!("{storage_root}/"));
+            let mut requests = if shared {
+                Vec::new()
+            } else {
+                expand_mapping_glob(&mapping.request_path)?
+            };
+            if let Some(relative) = mapping
+                .request_path
+                .strip_prefix(&format!("{storage_root}/"))
+            {
+                for backend_root in [
+                    format!("/data/media/{}", self.user_id),
+                    self.to_data_media_backend_path(&self.redirect_target),
+                ] {
+                    for backend in expand_mapping_glob(&format!("{backend_root}/{relative}"))? {
+                        if let Some(relative) = backend.strip_prefix(&backend_root) {
+                            requests.push(format!("{storage_root}{relative}"));
+                        }
+                    }
+                }
+            }
+            requests.sort();
+            requests.dedup();
+            for request in requests {
+                if let Some(target) = map_path_once(&request, &mapping)? {
+                    concrete.push(PathMapping::new(request, target));
+                }
+            }
+        }
+        compose_mount_mappings(&concrete)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn apply_resolved_path_mappings(
         &self,
-        resolved_mappings: &[PathMapping],
-        storage_path: &str,
-        target_source_root: &str,
+        mappings: &[PathMapping],
+        storage_root: &str,
+        source_root: &str,
         should_chown_current_dirs: bool,
         should_use_existing_target_source_only: bool,
         is_any_applied_out: Option<&mut bool>,
     ) -> bool {
-        let mut is_any_applied = false;
-
-        for mapping in resolved_mappings {
-            let mut target_relative = mapping.final_path[storage_path.len()..].to_string();
-            if target_relative.starts_with('/') {
-                target_relative.remove(0);
-            }
-            if target_relative.is_empty() {
-                continue;
-            }
-
-            let target_source = format!("{}/{}", target_source_root, target_relative);
-
-            if should_use_existing_target_source_only {
-                if !fs::is_directory(&target_source) {
-                    let target_data_media =
-                        format!("/data/media/{}/{}", self.user_id, target_relative);
-                    if !self.ensure_writable_mapped_directory(&target_data_media, self.app_uid) {
-                        log::warn!("map target missing and mkdir failed: {}", target_source);
-                        continue;
+        let mut applied = false;
+        for mapping in mappings {
+            let source = if let Some(relative) =
+                mapping.final_path.strip_prefix(&format!("{storage_root}/"))
+            {
+                paths::join(source_root, relative)
+            } else {
+                mapping.final_path.clone()
+            };
+            if !Path::new(&source).exists() {
+                if should_use_existing_target_source_only {
+                    return false;
+                }
+                if !self.ensure_writable_mapped_directory(&source, self.app_uid) {
+                    return false;
+                }
+            } else if source.starts_with(&format!("/data/media/{}/", self.user_id)) {
+                if fs::is_directory(&source) {
+                    if !self.ensure_writable_mapped_directory(&source, self.app_uid) {
+                        return false;
+                    }
+                } else {
+                    let Ok(path) = std::ffi::CString::new(source.as_str()) else {
+                        return false;
+                    };
+                    if unsafe { libc::chown(path.as_ptr(), self.app_uid as u32, 1023) } != 0
+                        || unsafe { libc::chmod(path.as_ptr(), 0o660) } != 0
+                    {
+                        log::error!(
+                            "prepare shared mapping file failed: {}",
+                            std::io::Error::last_os_error()
+                        );
+                        return false;
                     }
                 }
-            } else if !self.ensure_writable_mapped_directory(&target_source, self.app_uid) {
-                log::warn!("target missing and mkdir failed: {}", target_source);
-                continue;
             }
-
-            if !self.ensure_directory_exists(&mapping.request_path, should_chown_current_dirs) {
-                let mut current_relative = mapping.request_path[storage_path.len()..].to_string();
-                if current_relative.starts_with('/') {
-                    current_relative.remove(0);
-                }
-                let data_media_fallback =
-                    format!("/data/media/{}/{}", self.user_id, current_relative);
-                if !self.ensure_directory_exists(&data_media_fallback, should_chown_current_dirs) {
-                    log::warn!("mkdir map current failed: {}", mapping.request_path);
-                    continue;
-                }
+            if !self.prepare_mapping_endpoint(
+                &source,
+                &mapping.request_path,
+                should_chown_current_dirs,
+            ) {
+                return false;
             }
-
-            let mut is_current_path_mounted = false;
-            let _ = self.bind_mount_with_storage_aliases(
-                &target_source,
+            let mut mounted = false;
+            if !self.bind_mount_with_storage_aliases(
+                &source,
                 &mapping.request_path,
                 true,
-                super::PrimaryMountFailure::StopCurrentTarget,
+                super::PrimaryMountFailure::AbortAll,
+                Some("mapping mount failed"),
+                Some("mapping alias failed"),
                 None,
-                Some("map alias mount failed"),
-                Some("map alias ok"),
-                Some(&mut is_current_path_mounted),
-            );
-
-            if is_current_path_mounted {
-                is_any_applied = true;
-                log::info!("map {} -> {}", mapping.request_path, mapping.final_path);
+                Some(&mut mounted),
+            ) || !mounted
+            {
+                return false;
             }
+            applied = true;
+            log::info!("map {} -> {}", mapping.request_path, mapping.final_path);
         }
-
-        if let Some(out) = is_any_applied_out {
-            *out = is_any_applied;
+        if let Some(output) = is_any_applied_out {
+            *output = applied;
         }
         true
     }
+
+    fn prepare_mapping_endpoint(&self, source: &str, target: &str, should_chown: bool) -> bool {
+        if fs::is_directory(source) {
+            return self.ensure_directory_exists(target, should_chown);
+        }
+        if Path::new(target).is_file() {
+            return true;
+        }
+        if !self.ensure_directory_exists(&paths::parent(target), should_chown) {
+            return false;
+        }
+        match std_fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(target)
+        {
+            Ok(_) => true,
+            Err(error) => {
+                log::error!(
+                    "prepare mapping file failed path={} error={}",
+                    target,
+                    error
+                );
+                false
+            }
+        }
+    }
+}
+
+pub(super) fn expand_mapping_glob(pattern: &str) -> Result<Vec<String>, MappingError> {
+    if !pattern.contains(['*', '?']) {
+        return Ok(vec![pattern.to_string()]);
+    }
+    let parts: Vec<_> = pattern.split('/').filter(|item| !item.is_empty()).collect();
+    let mut candidates = vec![String::from("/")];
+    for part in parts {
+        let mut next = Vec::new();
+        for parent in candidates {
+            if !part.contains(['*', '?']) {
+                let path = paths::join(&parent, part);
+                if Path::new(&path).exists() {
+                    next.push(path);
+                }
+                continue;
+            }
+            let entries = match std_fs::read_dir(&parent) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    log::warn!(
+                        "mapping wildcard read failed path={} error={}",
+                        parent,
+                        error
+                    );
+                    return Err(MappingError::UnreadablePath);
+                }
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if paths::matches(part, &name, false) {
+                    next.push(paths::join(&parent, &name));
+                    if next.len() > MAPPING_EXPANSION_LIMIT {
+                        return Err(MappingError::TooManyMatches);
+                    }
+                }
+            }
+        }
+        candidates = next;
+    }
+    Ok(candidates)
 }

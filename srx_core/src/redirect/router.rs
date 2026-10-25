@@ -48,6 +48,9 @@ struct RouterState {
     allowed_real_paths: Vec<String>,
     excluded_real_paths: Vec<String>,
     path_mappings: Vec<PathMapping>,
+    is_mapping_mode_only: bool,
+    sandboxed_paths: Vec<String>,
+    read_only_paths: Vec<String>,
 }
 
 impl RouterState {
@@ -60,6 +63,9 @@ impl RouterState {
             allowed_real_paths: Vec::new(),
             excluded_real_paths: Vec::new(),
             path_mappings: Vec::new(),
+            is_mapping_mode_only: false,
+            sandboxed_paths: Vec::new(),
+            read_only_paths: Vec::new(),
         }
     }
 }
@@ -115,11 +121,15 @@ impl PathRouter {
         package_name: &str,
         app_uid: i32,
         redirect_target: &str,
-        allowed_real_paths: &[String],
-        excluded_real_paths: &[String],
-        path_mappings: &[PathMapping],
+        profile: &crate::config::UserProfile,
     ) {
+        let allowed_real_paths = &profile.allowed_real_paths;
+        let excluded_real_paths = &profile.excluded_real_paths;
+        let path_mappings = &profile.path_mappings;
         let mut state = self.state.write().unwrap_or_else(|err| err.into_inner());
+        state.is_mapping_mode_only = profile.is_mapping_mode_only;
+        state.sandboxed_paths = profile.sandboxed_paths.clone();
+        state.read_only_paths = profile.read_only_paths.clone();
         state.current_package = package_name.to_string();
         state.user_id = platform::user_id_from_uid(app_uid);
         state.storage_root = format!("/storage/emulated/{}", state.user_id);
@@ -186,11 +196,6 @@ impl PathRouter {
             if current_path == state.storage_root || target_path == state.storage_root {
                 continue;
             }
-            if !paths::starts_with(&current_path, &format!("{}/", state.storage_root))
-                || !paths::starts_with(&target_path, &format!("{}/", state.storage_root))
-            {
-                continue;
-            }
             if current_path == target_path {
                 continue;
             }
@@ -222,12 +227,20 @@ impl PathRouter {
 
     // 对路径执行重定向决策：映射优先，其次允许列表，最后默认重定向
     pub fn process_path(&self, original_path: &str) -> RedirectDecision {
-        let perf_started_ms = paths::monotonic_ms();
-        self.stats.total_checks.fetch_add(1, Ordering::Relaxed);
+        let count = self.stats.total_checks.fetch_add(1, Ordering::Relaxed) + 1;
+        let is_perf_enabled = log::log_enabled!(log::Level::Debug) && should_log_step(count, 64);
+        let now_ms = || {
+            if is_perf_enabled {
+                paths::monotonic_ms()
+            } else {
+                0
+            }
+        };
+        let perf_started_ms = now_ms();
 
-        let normalized_started_ms = paths::monotonic_ms();
+        let normalized_started_ms = now_ms();
         let normalized = paths::normalize(original_path);
-        let normalize_ms = paths::monotonic_ms().saturating_sub(normalized_started_ms);
+        let normalize_ms = now_ms().saturating_sub(normalized_started_ms);
         if normalized.is_empty() {
             self.stats.allowed.fetch_add(1, Ordering::Relaxed);
             let decision = RedirectDecision::allow();
@@ -271,38 +284,17 @@ impl PathRouter {
             return decision;
         }
 
-        if !paths::is_storage_path(&normalized) {
-            self.stats.allowed.fetch_add(1, Ordering::Relaxed);
-            let decision = RedirectDecision::allow();
-            log_router_perf(
-                "non_storage",
-                original_path,
-                &normalized,
-                "",
-                0,
-                0,
-                0,
-                normalize_ms,
-                0,
-                0,
-                0,
-                perf_started_ms,
-                &decision,
-            );
-            return decision;
-        }
-
-        let lock_started_ms = paths::monotonic_ms();
+        let lock_started_ms = now_ms();
         let state = self.state.read().unwrap_or_else(|err| err.into_inner());
-        let lock_ms = paths::monotonic_ms().saturating_sub(lock_started_ms);
+        let lock_ms = now_ms().saturating_sub(lock_started_ms);
         let resolved = paths::resolve_user_path(&normalized, state.user_id);
         let map_count = state.path_mappings.len();
         let allow_count = state.allowed_real_paths.len();
         let excl_count = state.excluded_real_paths.len();
 
-        let map_started_ms = paths::monotonic_ms();
+        let map_started_ms = now_ms();
         if let Some(mapped) = map_path_to_target(&state.path_mappings, &resolved) {
-            let map_ms = paths::monotonic_ms().saturating_sub(map_started_ms);
+            let map_ms = now_ms().saturating_sub(map_started_ms);
             self.stats.redirected.fetch_add(1, Ordering::Relaxed);
             log::debug!("map {} -> {}", resolved, mapped);
             let decision = RedirectDecision {
@@ -326,13 +318,32 @@ impl PathRouter {
             );
             return decision;
         }
-        let map_ms = paths::monotonic_ms().saturating_sub(map_started_ms);
+        let map_ms = now_ms().saturating_sub(map_started_ms);
 
-        let allow_started_ms = paths::monotonic_ms();
+        if !paths::is_storage_path(&resolved) {
+            self.stats.allowed.fetch_add(1, Ordering::Relaxed);
+            return RedirectDecision::allow();
+        }
+
+        let allow_started_ms = now_ms();
+        if state.is_mapping_mode_only {
+            let sandboxed = crate::domain::matches_policy_paths(&state.sandboxed_paths, &resolved);
+            if !sandboxed {
+                self.stats.allowed.fetch_add(1, Ordering::Relaxed);
+                return RedirectDecision::allow();
+            }
+            let new_path =
+                generate_redirected_path(&state.storage_root, &state.redirect_target, &resolved);
+            return RedirectDecision {
+                action: RedirectAction::Redirect,
+                new_path,
+            };
+        }
+
         if is_excluded_real_path(&state.excluded_real_paths, &resolved, &state.storage_root) {
             let redirected =
                 generate_redirected_path(&state.storage_root, &state.redirect_target, &resolved);
-            let allow_ms = paths::monotonic_ms().saturating_sub(allow_started_ms);
+            let allow_ms = now_ms().saturating_sub(allow_started_ms);
             if redirected != resolved {
                 let hit = self.stats.redirected.fetch_add(1, Ordering::Relaxed) + 1;
                 if should_log_step(hit, REDIRECT_LOG_STEP) {
@@ -361,8 +372,10 @@ impl PathRouter {
             }
         }
 
-        if is_allowed_real_path(&state.allowed_real_paths, &resolved, &state.storage_root) {
-            let allow_ms = paths::monotonic_ms().saturating_sub(allow_started_ms);
+        if is_allowed_real_path(&state.allowed_real_paths, &resolved, &state.storage_root)
+            || crate::domain::matches_policy_paths(&state.read_only_paths, &resolved)
+        {
+            let allow_ms = now_ms().saturating_sub(allow_started_ms);
             self.stats.allowed.fetch_add(1, Ordering::Relaxed);
             let decision = RedirectDecision::allow();
             log_router_perf(
@@ -382,7 +395,7 @@ impl PathRouter {
             );
             return decision;
         }
-        let allow_ms = paths::monotonic_ms().saturating_sub(allow_started_ms);
+        let allow_ms = now_ms().saturating_sub(allow_started_ms);
 
         let redirected =
             generate_redirected_path(&state.storage_root, &state.redirect_target, &resolved);

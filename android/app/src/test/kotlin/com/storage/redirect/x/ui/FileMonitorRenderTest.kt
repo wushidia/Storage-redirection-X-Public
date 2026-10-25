@@ -1,7 +1,10 @@
 package com.storage.redirect.x.ui
 
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.padding
 import androidx.lifecycle.ViewModelStore
 import com.storage.redirect.x.data.cache.AppPreferences
@@ -24,6 +27,25 @@ import org.robolectric.annotation.*
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class FileMonitorRenderTest {
+    @Test
+    fun advancedRuleControlsStayAlignedAndSwitchModes() {
+        var isMappingOnly by androidx.compose.runtime.mutableStateOf(false)
+        RenderScene {
+            AppTheme(AppThemeSettings(colorMode = ColorMode.LIGHT)) {
+                com.storage.redirect.x.ui.page.RuleOptionsCard(isMappingOnly, 2, 1,
+                    onModeChange = { isMappingOnly = it }, onReadOnly = {}, onSandboxed = {})
+            }
+        }.use { scene ->
+            scene.frames()
+            val readOnly = scene.tag("rule_read_only_paths").boundsInRoot
+            val sandbox = scene.tag("rule_sandboxed_paths").boundsInRoot
+            assertEquals(readOnly.left, sandbox.left, 1f)
+            assertEquals(readOnly.right, sandbox.right, 1f)
+            scene.tapTag("rule_mapping_mode_only")
+            assertTrue(isMappingOnly)
+            scene.capture("advanced-rule-options")
+        }
+    }
     @Test
     @Suppress("UNCHECKED_CAST")
     fun selectAllKeepsSelectionsOutsideTheVisibleFolders() {
@@ -158,19 +180,15 @@ class FileMonitorRenderTest {
     }
 
     @Test
-    fun emptySearchKeepsPagingAndMonitoringControl() {
+    fun emptySearchKeepsPagingAndObservesSettingsMonitoring() {
         AppPreferences.init(RuntimeEnvironment.getApplication())
-        var requested: Boolean? = null
+        com.storage.redirect.x.data.repository.ConfigRepository.publishMonitorEnabled(true)
         val cursors = mutableListOf<Long>()
         val repository = object : FileMonitorRepository() {
             override suspend fun loadPage(before: Long, after: Long): MonitorPage {
                 cursors += before
                 return MonitorPage(persistentListOf(), hasMore = cursors.size == 1,
                     daemonUpdatedMs = System.currentTimeMillis())
-            }
-            override suspend fun setMonitoringEnabled(enabled: Boolean): Boolean {
-                requested = enabled
-                return true
             }
         }
         val store = ViewModelStore()
@@ -183,9 +201,11 @@ class FileMonitorRenderTest {
             scene.frames()
             assertTrue(scene.texts("暂无监视记录").isNotEmpty())
             scene.tag("monitor_load_more")
-            scene.tapTag("monitor_toggle")
-            repeat(30) { scene.frames(2); if (vm.uiState.value.isChangingMonitoring) Thread.sleep(5) }
-            assertEquals(false, requested)
+            assertFalse(scene.nodes().any {
+                it.config.getOrNull(SemanticsProperties.TestTag) == "monitor_toggle"
+            })
+            com.storage.redirect.x.data.repository.ConfigRepository.publishMonitorEnabled(false)
+            scene.frames()
             assertFalse(vm.uiState.value.isMonitoringEnabled)
             scene.capture("monitor-empty-search")
             scene.tapTag("monitor_load_more")
@@ -194,6 +214,7 @@ class FileMonitorRenderTest {
             assertFalse(vm.uiState.value.hasMore)
         }
         store.clear()
+        com.storage.redirect.x.data.repository.ConfigRepository.publishMonitorEnabled(true)
     }
 
     @Test

@@ -111,7 +111,7 @@
     <string name="rule_config_error_android_prefix">路径不能位于 Android/data 下</string>
     <string name="rule_config_error_mapping_wildcard">映射路径不支持 * 或 ? 通配符</string>
     <string name="rule_config_error_mapping_exclusion">映射路径不支持 ! 排除前缀</string>
-    <string name="rule_config_allowed_paths_rule_hint">支持通配符: * ?\n* 表示任意长度字符。\n? 表示单个字符。\n! 表示排除前缀。\n仅支持真实路径访问。</string>
+    <string name="rule_config_allowed_paths_rule_hint">* 表示任意长度字符，? 表示单个字符。以 ! 开头可排除目录。</string>
     <string name="rule_config_allowed_paths_rule_hint_desc">查看规则说明</string>
     <string name="rule_config_browse">浏览</string>
     <string name="rule_config_browser_load_failed">读取目录失败</string>
@@ -282,7 +282,21 @@
     <string name="file_monitor_daemon_stale">日志服务未响应</string>
     <string name="file_monitor_enabled">文件监控</string>
     <string name="file_monitor_disabled">文件监控已关闭</string>
-    <string name="file_monitor_start">开启文件监控</string>
-    <string name="file_monitor_stop">关闭文件监控</string>
     <string name="file_monitor_control_failed">模块未能应用监控设置</string>
+    <string name="rule_mapping_mode_only">仅映射模式</string>
+    <string name="rule_mapping_mode_only_summary">未匹配的路径保持原样</string>
+    <string name="rule_sandboxed_paths">局部沙盒</string>
+    <string name="rule_read_only_paths">只读目录</string>
+    <plurals name="rule_path_count">
+        <item quantity="other">%1$d 个目录</item>
+    </plurals>
+    <string name="rule_paths_empty">暂无目录</string>
+    <string name="rule_path_label">目录路径</string>
+    <string name="rule_error_mapping_capture">目标通配符数量超过请求路径</string>
+    <string name="rule_error_mapping_cycle">映射规则存在循环</string>
+    <string name="rule_error_mapping_depth">映射层数过多</string>
+    <string name="auto_redirect_new_apps">自动重定向新安装应用</string>
+    <string name="auto_redirect_template">新应用使用的模板</string>
+    <string name="auto_redirect_default_rules">默认规则</string>
+    <string name="auto_redirect_template_missing">模板已不存在</string>
 </resources>

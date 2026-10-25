@@ -25,6 +25,12 @@ pub unsafe extern "C" fn hooked_rename(oldpath: *const c_char, newpath: *const c
                 caller::update_caller_package_for_current_thread(hub);
             }
 
+            if crate::hook::readonly::denies_at(hub, libc::AT_FDCWD, oldpath)
+                || crate::hook::readonly::denies_at(hub, libc::AT_FDCWD, newpath)
+            {
+                return -1;
+            }
+
             if oldpath.is_null() || newpath.is_null() {
                 return call_rename(oldpath, newpath);
             }
@@ -137,6 +143,12 @@ pub unsafe extern "C" fn hooked_renameat2(
             hub.increment_rename_calls();
             if runtime::should_resolve_caller_context(hub) {
                 caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_at(hub, olddirfd, oldpath)
+                || crate::hook::readonly::denies_at(hub, newdirfd, newpath)
+            {
+                return -1;
             }
 
             if oldpath.is_null() || newpath.is_null() {

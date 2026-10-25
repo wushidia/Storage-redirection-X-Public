@@ -98,15 +98,18 @@ internal fun AppsPageMiuix(
             }
         },
     ) {
-        item {
-            SmallTitle(
-                "${stringResource(R.string.apps_title)}  $visibleCount / ${data.filteredApps.size}"
-            )
-        }
-        if (data.isLoading && data.filteredApps.isEmpty()) {
+        val isCatalogLoading = data.isLoading && data.filteredApps.isEmpty()
+        if (!isCatalogLoading) {
             item {
-                Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                SmallTitle(
+                    "${stringResource(R.string.apps_title)}  $visibleCount / ${data.filteredApps.size}"
+                )
+            }
+        }
+        if (isCatalogLoading) {
+            item {
+                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                    InfiniteProgressIndicator(Modifier.testTag("apps_loading_indicator"))
                 }
             }
         } else if (data.filteredApps.isEmpty()) {

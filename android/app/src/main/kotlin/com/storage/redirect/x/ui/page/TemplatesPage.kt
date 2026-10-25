@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -35,11 +36,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.storage.redirect.x.R
+import com.storage.redirect.x.ui.component.PathInputField
+import com.storage.redirect.x.data.model.validateMappings
 import com.storage.redirect.x.data.model.PathValidationResult
 import com.storage.redirect.x.data.model.RedirectConfig
 import com.storage.redirect.x.data.model.RedirectTemplate
 import com.storage.redirect.x.data.model.StoragePathMapping
 import com.storage.redirect.x.data.repository.TemplateRepository
+import com.storage.redirect.x.data.repository.PathBrowserRepository
+import com.storage.redirect.x.ui.component.DetailTransition
+import com.storage.redirect.x.ui.page.pathbrowser.PathSelectionKind
 import com.storage.redirect.x.ui.component.AlignedIconButton as IconButton
 import com.storage.redirect.x.ui.component.SRX_TOP_BAR_TRAILING_ICON_END_PADDING
 import com.storage.redirect.x.ui.component.SrxLazyColumn as LazyColumn
@@ -85,6 +91,12 @@ fun TemplatesPage(onBack: () -> Unit = {}) {
     var nameDialogInput by remember { mutableStateOf("") }
     var nameDialogError by remember { mutableStateOf(false) }
     var deleteTemplate by remember { mutableStateOf<RedirectTemplate?>(null) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(templates) {
+        if (!templateRepo.syncIfAutomaticEnabled())
+            android.widget.Toast.makeText(context, R.string.rule_config_save_failed, android.widget.Toast.LENGTH_SHORT).show()
+    }
 
     fun refresh(newTemplates: ImmutableList<RedirectTemplate> = templateRepo.loadTemplates()) {
         templates = newTemplates
@@ -318,7 +330,50 @@ private fun TemplateEditorPage(
         onTemplateChange(currentTemplate)
     }
 
-    BackHandler { onBack() }
+    var detail by remember { mutableStateOf<TemplateEditorDetail?>(null) }
+    val browserRepository = remember { PathBrowserRepository() }
+    val userId = android.os.Process.myUid() / 100000
+    fun closeDetail() {
+        when (detail) {
+            TemplateEditorDetail.Allowed -> showPathDialog.value = true
+            TemplateEditorDetail.Request, TemplateEditorDetail.Target -> showMappingDialog.value = true
+            else -> Unit
+        }
+        detail = null
+    }
+    BackHandler(enabled = detail == null) { onBack() }
+
+    DetailTransition(detail = detail, onBack = ::closeDetail, detailContent = { target ->
+        if (target == TemplateEditorDetail.ReadOnly || target == TemplateEditorDetail.Sandboxed) {
+            val kind = if (target == TemplateEditorDetail.ReadOnly) PolicyPathKind.ReadOnly else PolicyPathKind.Sandboxed
+            RulePathsPage(kind, if (kind == PolicyPathKind.ReadOnly) currentTemplate.readOnlyPaths else currentTemplate.sandboxedPaths,
+                userId, browserRepository, onBack = { detail = null }, onChange = { values ->
+                    updateTemplate(if (kind == PolicyPathKind.ReadOnly) currentTemplate.copy(readOnlyPaths = values.toImmutableList())
+                        else currentTemplate.copy(sandboxedPaths = values.toImmutableList()))
+                })
+        } else {
+            PathBrowserPage(title = stringResource(R.string.rule_config_browser_title),
+                browserRepository = browserRepository, userId = userId,
+                multiSelect = target == TemplateEditorDetail.Allowed && pathDialogIndex == null,
+                allowExclude = target == TemplateEditorDetail.Allowed,
+                selectionKind = if (target == TemplateEditorDetail.Allowed) PathSelectionKind.Allowed else PathSelectionKind.Mapping,
+                isInitiallyExcluded = target == TemplateEditorDetail.Allowed && dialogPathInput.trim().startsWith('!'),
+                onBack = ::closeDetail,
+                onPathSelect = { value ->
+                    when (target) {
+                        TemplateEditorDetail.Allowed -> { dialogPathInput = value; pathDialogErrorResId = null }
+                        TemplateEditorDetail.Request -> { dialogMappingRequestPathInput = value; mappingDialogErrorResId = null }
+                        TemplateEditorDetail.Target -> { dialogMappingFinalPathInput = value; mappingDialogErrorResId = null }
+                    }
+                    closeDetail()
+                },
+                onPathsSelect = { values ->
+                    val paths = (currentTemplate.allowedRealPaths + values).mapNotNull(RedirectConfig::normalizeAllowedPath).distinct()
+                    updateTemplate(currentTemplate.copy(allowedRealPaths = paths.toImmutableList()))
+                    detail = null
+                })
+        }
+    }) {
 
     Scaffold(
         modifier = Modifier.testTag("page_template_editor"),
@@ -353,6 +408,15 @@ private fun TemplateEditorPage(
                 PaddingValues(top = padding.calculateTopPadding(), start = 12.dp, end = 12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
+            item {
+                Spacer(Modifier.height(TEMPLATE_SECTION_TOP_SPACING))
+                RuleOptionsCard(currentTemplate.isMappingModeOnly, currentTemplate.readOnlyPaths.size, currentTemplate.sandboxedPaths.size,
+                    onModeChange = { updateTemplate(currentTemplate.copy(isMappingModeOnly = it)) },
+                    onReadOnly = { detail = TemplateEditorDetail.ReadOnly },
+                    onSandboxed = { detail = TemplateEditorDetail.Sandboxed })
+                Spacer(Modifier.height(TEMPLATE_SECTION_TOP_SPACING))
+            }
+            if (!currentTemplate.isMappingModeOnly) {
             item {
                 TemplateSectionHeader(
                     title =
@@ -408,6 +472,8 @@ private fun TemplateEditorPage(
                         },
                     )
                 }
+            }
+
             }
 
             item {
@@ -508,14 +574,16 @@ private fun TemplateEditorPage(
     ) {
         Column(Modifier.heightIn(max = 500.dp)) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                TextField(
+                PathInputField(
                     value = dialogPathInput,
                     onValueChange = {
                         dialogPathInput = it
                         pathDialogErrorResId = null
                     },
                     label = stringResource(R.string.rule_config_real_path),
-                    modifier = Modifier.fillMaxWidth().testTag("template_allowed_path_input"),
+                    onBrowse = { showPathDialog.value = false; detail = TemplateEditorDetail.Allowed },
+                    inputModifier = Modifier.testTag("template_allowed_path_input"),
+                    browseModifier = Modifier.testTag("template_allowed_path_input_browse"),
                 )
                 pathDialogErrorResId?.let { errorResId ->
                     Spacer(Modifier.height(TEMPLATE_DIALOG_FIELD_SPACING))
@@ -566,24 +634,28 @@ private fun TemplateEditorPage(
     ) {
         Column(Modifier.heightIn(max = 500.dp)) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                TextField(
+                PathInputField(
                     value = dialogMappingRequestPathInput,
                     onValueChange = {
                         dialogMappingRequestPathInput = it
                         mappingDialogErrorResId = null
                     },
                     label = stringResource(R.string.rule_config_mapping_request_path),
-                    modifier = Modifier.fillMaxWidth().testTag("template_mapping_request_input"),
+                    onBrowse = { showMappingDialog.value = false; detail = TemplateEditorDetail.Request },
+                    inputModifier = Modifier.testTag("template_mapping_request_input"),
+                    browseModifier = Modifier.testTag("template_mapping_request_input_browse"),
                 )
                 Spacer(Modifier.height(TEMPLATE_DIALOG_FIELD_SPACING))
-                TextField(
+                PathInputField(
                     value = dialogMappingFinalPathInput,
                     onValueChange = {
                         dialogMappingFinalPathInput = it
                         mappingDialogErrorResId = null
                     },
                     label = stringResource(R.string.rule_config_mapping_final_path),
-                    modifier = Modifier.fillMaxWidth().testTag("template_mapping_final_input"),
+                    onBrowse = { showMappingDialog.value = false; detail = TemplateEditorDetail.Target },
+                    inputModifier = Modifier.testTag("template_mapping_final_input"),
+                    browseModifier = Modifier.testTag("template_mapping_final_input_browse"),
                 )
                 mappingDialogErrorResId?.let { errorResId ->
                     Spacer(Modifier.height(TEMPLATE_DIALOG_FIELD_SPACING))
@@ -627,6 +699,11 @@ private fun TemplateEditorPage(
                         mappings.add(mapping)
                     } else if (index in mappings.indices) {
                         mappings[index] = mapping
+                    }
+                    val problem = validateMappings(mappings, userId)
+                    if (problem != null) {
+                        mappingDialogErrorResId = mappingProblemResId(problem)
+                        return@TemplateDialogButtonRow false
                     }
                     updateTemplate(currentTemplate.copy(pathMappings = mappings.toImmutableList()))
                     true
@@ -680,6 +757,7 @@ private fun TemplateEditorPage(
                 true
             },
         )
+    }
     }
 }
 
@@ -897,3 +975,5 @@ private sealed class TemplateDeleteTarget {
 
     data class Mapping(val index: Int) : TemplateDeleteTarget()
 }
+
+private enum class TemplateEditorDetail { Allowed, Request, Target, ReadOnly, Sandboxed }

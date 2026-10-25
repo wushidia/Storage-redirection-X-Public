@@ -19,6 +19,7 @@ import com.storage.redirect.x.R
 import com.storage.redirect.x.data.cache.AppPreferences
 import com.storage.redirect.x.data.cache.PreferenceKeys
 import com.storage.redirect.x.data.repository.ConfigRepository
+import com.storage.redirect.x.data.repository.TemplateRepository
 import com.storage.redirect.x.ui.component.*
 import com.storage.redirect.x.ui.navigation.LocalNavigator
 import com.storage.redirect.x.util.BackupRestoreNotifier
@@ -34,6 +35,9 @@ fun SettingsPage(bottomInnerPadding: Dp = 0.dp) {
     val vm: SettingsViewModel = viewModel()
     val state by vm.uiState.collectAsStateWithLifecycle()
     val canOperate = state.hasRoot == true && !state.isWorking
+    val templates = TemplateRepository().loadTemplates()
+    val templateIds = listOf("") + templates.map { it.id }
+    val templateNames = listOf(stringResource(R.string.auto_redirect_default_rules)) + templates.map { it.name }
     var language by remember {
         mutableIntStateOf(AppPreferences.getInt(PreferenceKeys.LANGUAGE, 0))
     }
@@ -159,6 +163,25 @@ fun SettingsPage(bottomInnerPadding: Dp = 0.dp) {
                     ArrowPreference(
                         title = stringResource(R.string.apps_templates),
                         onClick = { navigator.push("templates") },
+                    )
+                },
+                CardItem("auto_redirect") {
+                    SwitchPreference(
+                        title = stringResource(R.string.auto_redirect_new_apps),
+                        checked = state.autoRedirectPolicy.isEnabled,
+                        enabled = canOperate,
+                        onCheckedChange = { vm.setAutoRedirectPolicy(state.autoRedirectPolicy.copy(isEnabled = it)) },
+                    )
+                },
+                CardItem("auto_redirect_template") {
+                    ChoicePreference(
+                        title = stringResource(R.string.auto_redirect_template),
+                        items = templateNames,
+                        selectedIndex = templateIds.indexOf(state.autoRedirectPolicy.templateId),
+                        summary = if (state.autoRedirectPolicy.templateId !in templateIds)
+                            stringResource(R.string.auto_redirect_template_missing) else null,
+                        enabled = canOperate && state.autoRedirectPolicy.isEnabled,
+                        onSelect = { vm.setAutoRedirectPolicy(state.autoRedirectPolicy.copy(templateId = templateIds[it])) },
                     )
                 },
             ),

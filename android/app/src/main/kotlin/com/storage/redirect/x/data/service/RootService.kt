@@ -5,6 +5,8 @@ import com.storage.redirect.x.BuildConfig
 import com.storage.redirect.x.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import java.io.IOException
 
 // Root 命令执行结果
 data class CommandResult(
@@ -24,18 +26,21 @@ data class SystemUser(
 // Root 命令执行服务（直接调用 su，无需 MethodChannel）
 // 无状态单例，避免各页面重复创建实例
 object RootService {
+    private val commandRunner = RootCommandRunner()
+    private lateinit var applicationApk: String
 
-    suspend fun isRootAvailable(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            val exitCode = process.waitFor()
-            val available = exitCode == 0
-            Logger.debug("Root check: available=$available")
-            available
-        } catch (e: Exception) {
-            Logger.error("Root check error: ${e.message}")
-            false
-        }
+    fun initialize(apk: String) { applicationApk = apk }
+
+    suspend fun packageCommand(vararg arguments: String): CommandResult = runCommand(
+        "CLASSPATH=${shellQuote(applicationApk)} /system/bin/app_process /system/bin " +
+            "org.srx.packages.PackageQueryMain " + arguments.joinToString(" ", transform = ::shellQuote)
+    )
+
+    suspend fun isRootAvailable(): Boolean {
+        val result = runCommand("id")
+        val isAvailable = result.isSuccess && result.stdout.contains("uid=0")
+        Logger.debug("Root check: available=$isAvailable")
+        return isAvailable
     }
 
     // MediaProvider 一重启，正在运行的重定向 app 里的 FUSE 就失效了，得让它们冷启动重建挂载
@@ -93,19 +98,26 @@ object RootService {
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
-    suspend fun runCommand(command: String): CommandResult = withContext(Dispatchers.IO) {
+    suspend fun runCommand(command: String): CommandResult = execute(command)
+
+    suspend fun runCommandStreaming(
+        command: String, timeoutMs: Long = 120_000, onStdoutLine: (String) -> Unit,
+    ): CommandResult = execute(command, timeoutMs, onStdoutLine)
+
+    private suspend fun execute(
+        command: String, timeoutMs: Long = 120_000, onStdoutLine: ((String) -> Unit)? = null,
+    ): CommandResult {
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            val stdout = process.inputStream.bufferedReader().readText()
-            val stderr = process.errorStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                Logger.warn("Command failed [$exitCode]: $command | stderr=$stderr")
+            val result = commandRunner.run(command, timeoutMs, onStdoutLine)
+            if (!result.isSuccess) {
+                Logger.warn("Command failed [${result.exitCode}]: $command | stderr=${result.stderr}")
             }
-            CommandResult(exitCode, stdout, stderr)
-        } catch (e: Exception) {
+            return result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
             Logger.error("Command error: $command | ${e.message}")
-            CommandResult(-1, "", e.message ?: "")
+            return CommandResult(-1, "", e.message.orEmpty())
         }
     }
 
@@ -126,34 +138,4 @@ object RootService {
         return result.isSuccess
     }
 
-    suspend fun getSystemUsers(): List<SystemUser> {
-        val result = runCommand("ls -1 /data/system/users/ 2>/dev/null")
-        if (!result.isSuccess || result.stdout.isBlank()) {
-            Logger.warn("Get user list failed, fallback to Owner")
-            return listOf(SystemUser(0, DEFAULT_USER_NAMES[0] ?: "Owner"))
-        }
-
-        val users = result.stdout.trim().lines().mapNotNull { line ->
-            val userId = line.trim().toIntOrNull() ?: return@mapNotNull null
-            if (userId < 0) return@mapNotNull null
-
-            val nameResult = runCommand("getprop 'persist.sys.user.$userId.name'")
-            val name = if (nameResult.isSuccess && nameResult.stdout.trim().isNotEmpty()) {
-                nameResult.stdout.trim()
-            } else {
-                DEFAULT_USER_NAMES[userId] ?: "User $userId"
-            }
-            SystemUser(userId, name)
-        }.sortedBy { it.id }
-
-        return users.ifEmpty { listOf(SystemUser(0, DEFAULT_USER_NAMES[0] ?: "Owner")) }
-    }
-
-    // 用户名默认值在 UI 层通过 strings.xml 覆盖显示，此处仅作 fallback
-    private val DEFAULT_USER_NAMES = mapOf(
-        0 to "Owner",
-        10 to "Work Profile",
-        11 to "Guest",
-        12 to "Accessibility",
-    )
 }

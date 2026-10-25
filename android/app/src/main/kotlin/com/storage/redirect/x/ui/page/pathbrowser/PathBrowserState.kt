@@ -10,6 +10,7 @@ import com.storage.redirect.x.data.model.RedirectConfig
 import com.storage.redirect.x.data.repository.PathBrowserRepository
 
 internal enum class BrowserDialog { CreateDirectory, Selection }
+enum class PathSelectionKind { Mapping, Allowed, Policy }
 
 @Stable
 internal class PathBrowserState(
@@ -18,6 +19,7 @@ internal class PathBrowserState(
     val multiSelect: Boolean,
     val allowExclude: Boolean,
     isInitiallyExcluded: Boolean = false,
+    val selectionKind: PathSelectionKind = PathSelectionKind.Mapping,
 ) {
     var currentPath by mutableStateOf("")
         private set
@@ -53,7 +55,11 @@ internal class PathBrowserState(
                 path.split('/').none { it == "." || it == ".." } &&
                 !path.contains('*') && !path.contains('?')
         }
-        return RedirectConfig.validateMappingPath(path) is PathValidationResult.Valid
+        return when (selectionKind) {
+            PathSelectionKind.Mapping -> RedirectConfig.validateMappingPath(path) is PathValidationResult.Valid
+            PathSelectionKind.Allowed -> RedirectConfig.validateAllowedPath(path) is PathValidationResult.Valid
+            PathSelectionKind.Policy -> RedirectConfig.normalizePolicyPath(path) != null
+        }
     }
 
     fun navigateTo(path: String) {

@@ -86,7 +86,7 @@ pub fn should_allow_private_owner_sqlite_access_for_caller(
         return false;
     }
 
-    let owner_uid = policy::get_uid_for_package(&owner_package);
+    let owner_uid = policy::get_uid_for_package(&owner_package, user_id);
     if owner_uid >= ANDROID_APP_UID_START && platform::user_id_from_uid(owner_uid) != user_id {
         return false;
     }
@@ -148,7 +148,7 @@ pub fn should_allow_private_owner_sqlite_owner_backend(path: &str) -> Option<i32
         return None;
     }
 
-    let owner_uid = policy::get_uid_for_package(&owner_package);
+    let owner_uid = policy::get_uid_for_package(&owner_package, user_id);
     if owner_uid >= ANDROID_APP_UID_START {
         if platform::user_id_from_uid(owner_uid) != user_id {
             return None;

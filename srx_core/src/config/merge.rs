@@ -22,8 +22,8 @@ impl SettingsHub {
         let mut applied_shared_keys: HashSet<String> = HashSet::new();
 
         for (package_name, app) in &apps {
-            if policy::is_shared_group_package(package_name) {
-                let mut members = policy::get_shared_group_members(package_name);
+            if policy::is_shared_group_package(package_name, user_id) {
+                let mut members = policy::get_shared_group_members(package_name, user_id);
                 if members.is_empty() {
                     continue;
                 }
@@ -148,7 +148,7 @@ fn is_shared_group_consistent(
     user_id: i32,
     should_log_warning: bool,
 ) -> bool {
-    let group_members = policy::get_shared_group_members(package_name);
+    let group_members = policy::get_shared_group_members(package_name, user_id);
     if group_members.is_empty() {
         return true;
     }
@@ -232,6 +232,12 @@ fn normalize_mappings(mappings: &[PathMapping]) -> Vec<PathMapping> {
 
 fn is_user_profile_equivalent(left: &UserProfile, right: &UserProfile) -> bool {
     if left.is_enabled != right.is_enabled {
+        return false;
+    }
+    if left.is_mapping_mode_only != right.is_mapping_mode_only
+        || left.sandboxed_paths != right.sandboxed_paths
+        || left.read_only_paths != right.read_only_paths
+    {
         return false;
     }
     if left.allowed_real_paths != right.allowed_real_paths {

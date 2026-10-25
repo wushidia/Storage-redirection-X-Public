@@ -28,7 +28,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
-    sourceSets.getByName("test").java.directories.add("../../srx_core/java_src")
+    sourceSets.getByName("main").java.directories.add("../../srx_core/java_src/org/srx/packages")
+    sourceSets.getByName("test").java.directories.addAll(listOf(
+        "../../srx_core/java_src/org/srx/hook",
+        "../../srx_core/java_src/org/srx/monitor",
+    ))
 
     testOptions {
         unitTests.isIncludeAndroidResources = true

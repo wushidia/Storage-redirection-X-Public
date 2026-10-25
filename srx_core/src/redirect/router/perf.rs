@@ -26,6 +26,9 @@ pub(super) fn log_router_perf(
     started_ms: i64,
     decision: &RedirectDecision,
 ) {
+    if started_ms == 0 {
+        return;
+    }
     let total_ms = paths::monotonic_ms().saturating_sub(started_ms);
     if total_ms < ROUTER_SLOW_MS {
         return;

@@ -12,12 +12,18 @@ import java.lang.reflect.Method;
 public final class MonitorConnection implements AutoCloseable {
   private final Object activityManager;
   private final Object provider;
+  private final int userId;
   final String authority;
   private final IBinder token = new Binder();
   public final IBinder binder;
 
   public MonitorConnection(String authority) throws Exception {
+    this(authority, 0);
+  }
+
+  public MonitorConnection(String authority, int userId) throws Exception {
     this.authority = authority;
+    this.userId = userId;
     IBinder activity = (IBinder) Class.forName("android.os.ServiceManager")
                            .getMethod("waitForService", String.class)
                            .invoke(null, "activity");
@@ -27,7 +33,7 @@ public final class MonitorConnection implements AutoCloseable {
     Method acquire = Class.forName("android.app.IActivityManager")
                          .getMethod("getContentProviderExternal", String.class, int.class,
                              IBinder.class, String.class);
-    Object holder = acquire.invoke(activityManager, authority, 0, token, "srx-file-monitor");
+    Object holder = acquire.invoke(activityManager, authority, userId, token, "srx-file-monitor");
     if (holder == null)
       throw new IllegalStateException("Provider is unavailable: " + authority);
     provider = holder.getClass().getField("provider").get(holder);
@@ -48,7 +54,7 @@ public final class MonitorConnection implements AutoCloseable {
     try {
       Class.forName("android.app.IActivityManager")
           .getMethod("removeContentProviderExternalAsUser", String.class, IBinder.class, int.class)
-          .invoke(activityManager, authority, token, 0);
+          .invoke(activityManager, authority, token, userId);
     } catch (ReflectiveOperationException e) {
       android.util.Log.w("SrxFileMonitor", "release provider", e);
     }

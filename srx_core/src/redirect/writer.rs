@@ -48,17 +48,13 @@ pub fn get_caller_mappings(caller_package: &str, caller_uid: i32) -> Vec<PathMap
 }
 
 pub fn map_path_by_caller_mappings(path: &str, mappings: &[PathMapping]) -> String {
-    for mapping in mappings {
-        if path == mapping.request_path {
-            return mapping.final_path.clone();
-        }
-        let prefix = format!("{}/", mapping.request_path);
-        if paths::starts_with(path, &prefix) {
-            let suffix = &path[mapping.request_path.len()..];
-            return format!("{}{}", mapping.final_path, suffix);
+    match crate::domain::resolve_mapping_chain(path, mappings) {
+        Ok(path) => path.unwrap_or_default(),
+        Err(error) => {
+            log::warn!("caller mapping chain rejected: {:?}", error);
+            String::new()
         }
     }
-    String::new()
 }
 
 pub fn classify_path_by_caller_real_paths(
@@ -68,6 +64,21 @@ pub fn classify_path_by_caller_real_paths(
 ) -> CallerRealPathMatch {
     if resolved_path.is_empty() {
         return CallerRealPathMatch::None;
+    }
+
+    if let Some(profile) = caller_profile(caller_package, caller_uid) {
+        if profile.is_mapping_mode_only {
+            return if crate::domain::matches_policy_paths(&profile.sandboxed_paths, resolved_path) {
+                CallerRealPathMatch::Excluded
+            } else {
+                CallerRealPathMatch::Allowed
+            };
+        }
+        if crate::domain::matches_policy_paths(&profile.read_only_paths, resolved_path)
+            && !matches_any_real_path(&profile.excluded_real_paths, resolved_path)
+        {
+            return CallerRealPathMatch::Allowed;
+        }
     }
 
     CALLER_ALLOWED_CACHE.with(|cache| {
@@ -204,7 +215,7 @@ pub fn maybe_override_system_writer_caller_by_path(
         return;
     }
 
-    let inferred_uid = policy::get_uid_for_package(&inferred);
+    let inferred_uid = policy::get_uid_for_package(&inferred, user_id);
     if !effective_caller_package.is_empty() && inferred_uid != *effective_caller_uid {
         return;
     }
@@ -307,17 +318,14 @@ fn build_caller_mappings(caller_package: &str, caller_uid: i32) -> Vec<PathMappi
         return Vec::new();
     }
 
-    let config = SettingsHub::instance();
-    let raw_mappings = config.get_path_mappings(caller_package, caller_uid);
+    let raw_mappings = caller_profile(caller_package, caller_uid)
+        .map(|profile| profile.path_mappings.clone())
+        .unwrap_or_default();
     if raw_mappings.is_empty() {
         return Vec::new();
     }
 
     let user_id = platform::user_id_from_uid(caller_uid);
-    let storage_root = format!("/storage/emulated/{}", user_id);
-    let android_prefix = format!("{}/Android", storage_root);
-    let android_prefix_with_slash = format!("{}/", android_prefix);
-
     let mut seen_current: HashSet<String> = HashSet::new();
     let mut mappings: Vec<PathMapping> = Vec::new();
 
@@ -333,18 +341,6 @@ fn build_caller_mappings(caller_package: &str, caller_uid: i32) -> Vec<PathMappi
             continue;
         }
         if current_path == target_path {
-            continue;
-        }
-        if !paths::starts_with(&current_path, &format!("{}/", storage_root))
-            || !paths::starts_with(&target_path, &format!("{}/", storage_root))
-        {
-            continue;
-        }
-        if current_path == android_prefix
-            || paths::starts_with(&current_path, &android_prefix_with_slash)
-            || target_path == android_prefix
-            || paths::starts_with(&target_path, &android_prefix_with_slash)
-        {
             continue;
         }
         if !seen_current.insert(current_path.clone()) {
@@ -472,3 +468,43 @@ static SYSTEM_WRITER_CALLER_DISABLED: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 static SYSTEM_WRITER_PATH_INFER_SKIPPED: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
+
+struct CallerProfileCache {
+    version: u64,
+    uid: i32,
+    package: String,
+    profile: Option<std::sync::Arc<crate::config::UserProfile>>,
+}
+thread_local! { static CALLER_PROFILE_CACHE: RefCell<Option<CallerProfileCache>> = const { RefCell::new(None) }; }
+
+pub fn caller_profile(
+    package: &str,
+    uid: i32,
+) -> Option<std::sync::Arc<crate::config::UserProfile>> {
+    CALLER_PROFILE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let settings = SettingsHub::instance();
+        let version = settings.config_version();
+        if let Some(current) = cache.as_ref()
+            && current.version == version
+            && current.uid == uid
+            && current.package == package
+        {
+            return current.profile.clone();
+        }
+        let user = platform::user_id_from_uid(uid);
+        let app_dir = format!("/data/user/{user}/{package}");
+        let target = format!("/storage/emulated/{user}/Android/data/{package}/sdcard");
+        let profile = settings
+            .get_user_profile(package, uid)
+            .filter(|profile| profile.is_enabled)
+            .map(|profile| std::sync::Arc::new(profile.resolved(user, &app_dir, &target)));
+        *cache = Some(CallerProfileCache {
+            version,
+            uid,
+            package: package.to_string(),
+            profile: profile.clone(),
+        });
+        profile
+    })
+}

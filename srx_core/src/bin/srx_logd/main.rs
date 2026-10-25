@@ -113,7 +113,8 @@ fn clear_monitor_store() -> io::Result<()> {
 }
 
 fn run_monitor_command(command: &str) -> io::Result<()> {
-    std::process::Command::new("/system/bin/app_process")
+    let mut process = std::process::Command::new("/system/bin/app_process");
+    process
         .env(
             "CLASSPATH",
             "/data/adb/modules/storage.redirect.x/monitor.dex",
@@ -122,16 +123,22 @@ fn run_monitor_command(command: &str) -> io::Result<()> {
             "/system/bin",
             "org.srx.monitor.MonitorServer",
             "/data/adb/modules/storage.redirect.x",
-            command,
-        ])
-        .status()
-        .and_then(|status| {
-            if status.success() {
-                Ok(())
-            } else {
-                Err(io::Error::other("monitor clear failed"))
-            }
-        })
+        ]);
+    if let Some(user_id) = command.strip_prefix("rules:") {
+        let user_id: u32 = user_id
+            .parse()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid Android user"))?;
+        process.args(["rules", &user_id.to_string()]);
+    } else {
+        process.arg(command);
+    }
+    process.status().and_then(|status| {
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("monitor clear failed"))
+        }
+    })
 }
 
 fn run_emit_stream(tag: Option<String>) -> io::Result<()> {
@@ -161,6 +168,9 @@ fn run_control(command: Option<String>) -> io::Result<()> {
             "missing control command",
         ));
     };
+    if command.starts_with("rules:") {
+        return run_monitor_command(&command);
+    }
     if command == "monitor-policy" {
         return run_monitor_command("policy");
     }

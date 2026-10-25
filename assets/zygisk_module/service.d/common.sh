@@ -47,23 +47,12 @@ refresh_uid_map() {
     return 0
   fi
 
-  mkdir -p "$CONFIG_DIR"
-  tmp_uids_file="${SYSTEM_WRITER_UIDS_FILE}.tmp"
-
-  {
-    echo "# package:uid"
-    cmd package list packages -U 2>/dev/null |
-      sed -n 's/^package:\([^ ]*\).* uid:\([0-9][0-9]*\).*/\1:\2/p' |
-      sort -u
-  } > "$tmp_uids_file"
-
-  entry_count=$(grep -c '^[^#].*:[0-9][0-9]*$' "$tmp_uids_file" 2>/dev/null)
-  if [ "$entry_count" -gt 0 ]; then
-    mv "$tmp_uids_file" "$SYSTEM_WRITER_UIDS_FILE"
-    chmod 644 "$SYSTEM_WRITER_UIDS_FILE"
+  if CLASSPATH="$MODDIR/monitor.dex" /system/bin/app_process /system/bin \
+      org.srx.packages.PackageQueryMain uids "$CONFIG_DIR" "$SHARED_CONFIG_DIR"; then
     echo "$now_sec" > "$UID_MAP_LAST_REFRESH_FILE"
   else
-    rm -f "$tmp_uids_file"
+    log -p w -t Boot "PM API UID index refresh failed"
+    return 1
   fi
 }
 

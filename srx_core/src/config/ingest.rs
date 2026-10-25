@@ -72,8 +72,14 @@ pub fn parse_app_config(state: &mut SettingsState, package_name: &str, json_cont
 
         let mut user_profile = UserProfile {
             is_enabled: true,
+            is_mapping_mode_only: user_obj
+                .get("mapping_mode_only")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             allowed_real_paths: Vec::new(),
             excluded_real_paths: Vec::new(),
+            sandboxed_paths: parse_policy_paths(user_obj.get("sandboxed_paths"), user_id),
+            read_only_paths: parse_policy_paths(user_obj.get("read_only_paths"), user_id),
             path_mappings: Vec::new(),
         };
 
@@ -118,20 +124,20 @@ pub fn parse_app_config(state: &mut SettingsState, package_name: &str, json_cont
         if let Some(mappings_value) = user_obj.get("path_mappings") {
             let mut index_by_current_path: HashMap<String, usize> = HashMap::new();
             let mut upsert_mapping = |current_raw: &str, target_raw: &str| {
-                let resolved_current = resolve_allowed_path_for_user(current_raw, &storage_root);
+                let resolved_current = resolve_mapping_path_for_user(current_raw, user_id);
                 if resolved_current.is_empty() {
                     log::warn!(
-                        "skip map (current invalid, relative only): user={} path={}",
+                        "skip map (invalid request): user={} path={}",
                         user_id,
                         current_raw
                     );
                     return;
                 }
 
-                let resolved_target = resolve_allowed_path_for_user(target_raw, &storage_root);
+                let resolved_target = resolve_mapping_path_for_user(target_raw, user_id);
                 if resolved_target.is_empty() {
                     log::warn!(
-                        "skip map (target invalid, relative only): user={} path={}",
+                        "skip map (invalid target): user={} path={}",
                         user_id,
                         target_raw
                     );
@@ -306,13 +312,43 @@ fn normalize_excluded_hidden_segment(segment: &str) -> &str {
 }
 
 // 拒绝 ! 排除前缀，只接受普通相对路径
-fn resolve_allowed_path_for_user(raw_path: &str, storage_root: &str) -> String {
-    let Some((is_excluded, resolved)) = resolve_allowed_path_rule_for_user(raw_path, storage_root)
-    else {
-        return String::new();
-    };
-    if is_excluded {
+fn resolve_mapping_path_for_user(raw_path: &str, user_id: i32) -> String {
+    let normalized = paths::normalize(raw_path.trim());
+    if normalized.is_empty()
+        || normalized.starts_with('!')
+        || paths::has_unsafe_segments(&normalized)
+    {
         return String::new();
     }
-    resolved
+    let resolved = paths::resolve_user_path(&normalized, user_id);
+    if paths::is_absolute(&resolved) || paths::has_path_placeholder(&resolved) {
+        resolved
+    } else {
+        format!("/storage/emulated/{user_id}/{resolved}")
+    }
+}
+
+fn parse_policy_paths(value: Option<&Value>, user_id: i32) -> Vec<String> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for item in items {
+        let Some(raw) = item.as_str() else { continue };
+        let (is_excluded, body) = raw
+            .trim()
+            .strip_prefix('!')
+            .map_or((false, raw.trim()), |body| (true, body.trim_start()));
+        let resolved = resolve_mapping_path_for_user(body, user_id);
+        if resolved.is_empty() {
+            continue;
+        }
+        paths.push(if is_excluded {
+            format!("!{resolved}")
+        } else {
+            resolved
+        });
+    }
+    normalize_paths(&mut paths);
+    paths
 }

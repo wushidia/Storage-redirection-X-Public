@@ -31,6 +31,7 @@ public final class MonitorServer extends Binder {
   private final ConcurrentHashMap<String, Long> producerLosses = new ConcurrentHashMap<>();
   private long policyModified = Long.MIN_VALUE;
   private final HashMap<String, String> connectionFailures = new HashMap<>();
+  private PackageEvents packageEvents;
 
   private static final class Pending {
     final long time;
@@ -309,6 +310,11 @@ public final class MonitorServer extends Binder {
         try {
           connection = new MonitorConnection(authority);
           configure(connection);
+          if (packageEvents == null) {
+            PackageEvents events = new PackageEvents(module, worker, identities::remove);
+            events.start();
+            packageEvents = events;
+          }
           final MonitorConnection current = connection;
           connection.binder.linkToDeath(()
                                             -> bridge.post(() -> {
@@ -344,6 +350,10 @@ public final class MonitorServer extends Binder {
   public static void main(String[] args) throws Exception {
     Looper.prepareMainLooper();
     if (args.length > 1) {
+      if ("rules".equals(args[1])) {
+        PackageEvents.refreshRules(Integer.parseInt(args[2]));
+        return;
+      }
       try (MonitorConnection provider = new MonitorConnection("media")) {
         Bundle command = new Bundle();
         command.putString("command", args[1]);

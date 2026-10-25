@@ -38,6 +38,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.storage.redirect.x.R
+import com.storage.redirect.x.ui.component.PathInputField
+import com.storage.redirect.x.data.model.validateMappings
+import com.storage.redirect.x.data.model.AppRedirectConfig
+import com.storage.redirect.x.ui.page.pathbrowser.PathSelectionKind
 import com.storage.redirect.x.data.model.PathValidationResult
 import com.storage.redirect.x.data.model.RedirectTemplate
 import com.storage.redirect.x.data.model.RedirectConfig
@@ -141,11 +145,18 @@ fun RuleConfigPage(
     var pendingApplyMode by remember { mutableStateOf<TemplateApplyMode?>(null) }
     val showSharedUidApplyDialog = remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        sharedUidRepo.load()
-        sharedPackages = sharedUidRepo.getSharedPackages(packageName)
-        config = configRepo.loadPackages(userId, listOf(packageName) + sharedPackages)
-        isLoading = false
+    LaunchedEffect(packageName, userId) {
+        isLoading = true
+        try {
+            sharedUidRepo.update(userId, com.storage.redirect.x.data.provider.AppListProvider(context).getInstalledApps(userId))
+            sharedPackages = sharedUidRepo.getSharedPackages(packageName, userId)
+            config = configRepo.loadPackages(userId, listOf(packageName) + sharedPackages)
+        } catch (error: java.io.IOException) {
+            Toast.makeText(context, error.message, Toast.LENGTH_LONG).show()
+            onBack(false)
+        } finally {
+            isLoading = false
+        }
     }
 
     // 保存配置并同步到共享 UID 的所有包（UI 立即更新，IO 异步写入）
@@ -269,7 +280,7 @@ fun RuleConfigPage(
     val pathMappings = appConfig?.pathMappings ?: emptyList()
     val isRedirected = config.redirectApps.contains(packageName)
 
-    var browseRoute by remember { mutableStateOf<PathBrowseRoute?>(null) }
+    var browseRoute by remember { mutableStateOf<ConfigDetailRoute?>(null) }
 
     BackHandler(enabled = browseRoute == null) { onBack(hasModified) }
 
@@ -283,7 +294,7 @@ fun RuleConfigPage(
     com.storage.redirect.x.ui.component.DetailTransition(
         detail = browseRoute,
         onBack = {
-            when (browseRoute?.target) {
+            when ((browseRoute as? PathBrowseRoute)?.target) {
                 BrowseTarget.Path -> showPathDialog.value = true
                 BrowseTarget.MappingTargetPath,
                 BrowseTarget.MappingCurrentPath -> showMappingDialog.value = true
@@ -291,7 +302,19 @@ fun RuleConfigPage(
             }
             browseRoute = null
         },
-        detailContent = { route ->
+        detailContent = { detail ->
+            if (detail is PolicyBrowseRoute) {
+                val current = appConfig ?: AppRedirectConfig(packageName, isEnabled = isRedirected)
+                RulePathsPage(kind = detail.kind,
+                    paths = if (detail.kind == PolicyPathKind.ReadOnly) current.readOnlyPaths else current.sandboxedPaths,
+                    userId = userId, browserRepository = pathBrowserRepo, onBack = { browseRoute = null },
+                    onChange = { paths ->
+                        val updated = if (detail.kind == PolicyPathKind.ReadOnly) current.copy(readOnlyPaths = paths)
+                            else current.copy(sandboxedPaths = paths)
+                        saveConfig(config.updateAppConfig(updated))
+                    })
+            } else {
+            val route = detail as PathBrowseRoute
             PathBrowserPage(
                 title = stringResource(R.string.rule_config_browser_title),
                 browserRepository = pathBrowserRepo,
@@ -300,6 +323,7 @@ fun RuleConfigPage(
                     if (route.target == BrowseTarget.MappingCurrentPath) packageName else null,
                 multiSelect = route.target == BrowseTarget.Path && pathDialogIndex == null,
                 allowExclude = route.target == BrowseTarget.Path,
+                selectionKind = if (route.target == BrowseTarget.Path) PathSelectionKind.Allowed else PathSelectionKind.Mapping,
                 isInitiallyExcluded = route.target == BrowseTarget.Path && dialogPathInput.trim().startsWith("!"),
                 onBack = {
                     // 恢复对话框 show 状态，弥补离开 composition 时的重置
@@ -355,6 +379,7 @@ fun RuleConfigPage(
                 browseRoute = null
             },
             )
+            }
         },
     ) {
         Scaffold(
@@ -441,6 +466,15 @@ fun RuleConfigPage(
                         }
                     }
 
+                    item {
+                        Spacer(Modifier.height(RULE_CONFIG_SECTION_TOP_SPACING))
+                        val current = appConfig ?: AppRedirectConfig(packageName, isEnabled = isRedirected)
+                        RuleOptionsCard(current.isMappingModeOnly, current.readOnlyPaths.size, current.sandboxedPaths.size,
+                            onModeChange = { saveConfig(config.updateAppConfig(current.copy(isMappingModeOnly = it))) },
+                            onReadOnly = { browseRoute = PolicyBrowseRoute(PolicyPathKind.ReadOnly) },
+                            onSandboxed = { browseRoute = PolicyBrowseRoute(PolicyPathKind.Sandboxed) })
+                    }
+
                     // 共享 UID 提示
                     if (sharedPackages.isNotEmpty()) {
                         item {
@@ -475,6 +509,7 @@ fun RuleConfigPage(
                     }
 
                     // 允许访问路径
+                    if (appConfig?.isMappingModeOnly != true) {
                     item {
                         SectionHeader(
                             title =
@@ -567,6 +602,8 @@ fun RuleConfigPage(
                     }
 
                     // 路径映射
+                    }
+
                     item {
                         SectionHeader(
                             title =
@@ -683,29 +720,21 @@ fun RuleConfigPage(
         ) {
             Column(Modifier.heightIn(max = 500.dp)) {
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextField(
-                            value = dialogPathInput,
-                            onValueChange = {
-                                dialogPathInput = it
-                                pathDialogErrorResId = null
-                            },
-                            label = stringResource(R.string.rule_config_real_path),
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(RULE_CONFIG_DIALOG_FIELD_SPACING))
-                        TextButton(
-                            text = stringResource(R.string.rule_config_browse),
-                            onClick = {
-                                showPathDialog.value = false
-                                showMappingDialog.value = false
-                                browseRoute = PathBrowseRoute(BrowseTarget.Path)
-                            },
-                        )
-                    }
+                    PathInputField(
+                        value = dialogPathInput,
+                        onValueChange = {
+                            dialogPathInput = it
+                            pathDialogErrorResId = null
+                        },
+                        label = stringResource(R.string.rule_config_real_path),
+                        onBrowse = {
+                            showPathDialog.value = false
+                            showMappingDialog.value = false
+                            browseRoute = PathBrowseRoute(BrowseTarget.Path)
+                        },
+                        inputModifier = Modifier.testTag("rule_allowed_path_input"),
+                        browseModifier = Modifier.testTag("rule_allowed_path_input_browse"),
+                    )
                     pathDialogErrorResId?.let { errorResId ->
                         Spacer(Modifier.height(RULE_CONFIG_DIALOG_FIELD_SPACING))
                         Text(
@@ -794,53 +823,37 @@ fun RuleConfigPage(
         ) {
             Column(Modifier.heightIn(max = 500.dp)) {
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextField(
-                            value = dialogMappingRequestPathInput,
-                            onValueChange = {
-                                dialogMappingRequestPathInput = it
-                                mappingDialogErrorResId = null
-                            },
-                            label = stringResource(R.string.rule_config_mapping_request_path),
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(RULE_CONFIG_DIALOG_FIELD_SPACING))
-                        TextButton(
-                            text = stringResource(R.string.rule_config_browse),
-                            onClick = {
-                                showPathDialog.value = false
-                                showMappingDialog.value = false
-                                browseRoute = PathBrowseRoute(BrowseTarget.MappingCurrentPath)
-                            },
-                        )
-                    }
+                    PathInputField(
+                        value = dialogMappingRequestPathInput,
+                        onValueChange = {
+                            dialogMappingRequestPathInput = it
+                            mappingDialogErrorResId = null
+                        },
+                        label = stringResource(R.string.rule_config_mapping_request_path),
+                        onBrowse = {
+                            showPathDialog.value = false
+                            showMappingDialog.value = false
+                            browseRoute = PathBrowseRoute(BrowseTarget.MappingCurrentPath)
+                        },
+                        inputModifier = Modifier.testTag("rule_mapping_request_input"),
+                        browseModifier = Modifier.testTag("rule_mapping_request_input_browse"),
+                    )
                     Spacer(Modifier.height(RULE_CONFIG_DIALOG_FIELD_SPACING))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextField(
-                            value = dialogMappingFinalPathInput,
-                            onValueChange = {
-                                dialogMappingFinalPathInput = it
-                                mappingDialogErrorResId = null
-                            },
-                            label = stringResource(R.string.rule_config_mapping_final_path),
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(RULE_CONFIG_DIALOG_FIELD_SPACING))
-                        TextButton(
-                            text = stringResource(R.string.rule_config_browse),
-                            onClick = {
-                                showPathDialog.value = false
-                                showMappingDialog.value = false
-                                browseRoute = PathBrowseRoute(BrowseTarget.MappingTargetPath)
-                            },
-                        )
-                    }
+                    PathInputField(
+                        value = dialogMappingFinalPathInput,
+                        onValueChange = {
+                            dialogMappingFinalPathInput = it
+                            mappingDialogErrorResId = null
+                        },
+                        label = stringResource(R.string.rule_config_mapping_final_path),
+                        onBrowse = {
+                            showPathDialog.value = false
+                            showMappingDialog.value = false
+                            browseRoute = PathBrowseRoute(BrowseTarget.MappingTargetPath)
+                        },
+                        inputModifier = Modifier.testTag("rule_mapping_final_input"),
+                        browseModifier = Modifier.testTag("rule_mapping_final_input_browse"),
+                    )
                     mappingDialogErrorResId?.let { errorResId ->
                         Spacer(Modifier.height(RULE_CONFIG_DIALOG_FIELD_SPACING))
                         Text(
@@ -878,22 +891,18 @@ fun RuleConfigPage(
                             return@DialogButtonRow false
                         }
 
-                        mappingDialogErrorResId = null
-                        scope.launch {
-                            val mapping =
-                                StoragePathMapping(
-                                    mappingRequestPathValidation.normalized,
-                                    mappingFinalPathValidation.normalized,
-                                )
-                            val newConfig =
-                                if (isEditingMapping) {
-                                    val targetIndex = mappingDialogIndex ?: return@launch
-                                    config.updatePathMapping(packageName, targetIndex, mapping)
-                                } else {
-                                    config.addPathMapping(packageName, mapping)
-                                }
-                            saveConfig(newConfig)
+                        val mapping = StoragePathMapping(mappingRequestPathValidation.normalized, mappingFinalPathValidation.normalized)
+                        val index = mappingDialogIndex
+                        val candidates = pathMappings.toMutableList()
+                        if (index == null) candidates.add(mapping) else candidates[index] = mapping
+                        val problem = validateMappings(candidates, userId, packageName)
+                        if (problem != null) {
+                            mappingDialogErrorResId = mappingProblemResId(problem)
+                            return@DialogButtonRow false
                         }
+                        mappingDialogErrorResId = null
+                        saveConfig(if (index == null) config.addPathMapping(packageName, mapping)
+                            else config.updatePathMapping(packageName, index, mapping))
                         true
                     },
                 )
@@ -941,7 +950,11 @@ fun RuleConfigPage(
                         templateRepo.saveTemplate(
                             templateRepo.createTemplateFromApp(templateName, currentConfig)
                         )
-                        Toast.makeText(context, R.string.templates_saved, Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            val synced = templateRepo.syncIfAutomaticEnabled()
+                            Toast.makeText(context, if (synced) R.string.templates_saved else R.string.rule_config_save_failed,
+                                Toast.LENGTH_SHORT).show()
+                        }
                         true
                     },
                 )
@@ -1051,7 +1064,9 @@ private enum class BrowseTarget {
     MappingCurrentPath,
 }
 
-private data class PathBrowseRoute(val target: BrowseTarget)
+private sealed interface ConfigDetailRoute
+private data class PathBrowseRoute(val target: BrowseTarget) : ConfigDetailRoute
+private data class PolicyBrowseRoute(val kind: PolicyPathKind) : ConfigDetailRoute
 
 // 弹窗按钮行
 @Composable

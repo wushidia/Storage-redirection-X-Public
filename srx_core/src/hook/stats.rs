@@ -102,6 +102,17 @@ impl InterceptHub {
         !self.is_monitor_only()
     }
 
+    pub fn refresh_writer_mode(&self) {
+        if self.is_hooks_installed.load(Ordering::Relaxed)
+            && policy::is_system_writer_package(&self.get_package_name())
+        {
+            self.is_monitor_only.store(
+                !crate::config::SettingsHub::instance().has_enabled_redirect_apps(),
+                Ordering::Relaxed,
+            );
+        }
+    }
+
     pub fn get_package_name(&self) -> String {
         self.package_name
             .read()

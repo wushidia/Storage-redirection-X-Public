@@ -179,10 +179,10 @@ public final class FileMonitorHooks extends Hooker {
       Hooker.refreshProviderLibraries();
       return callBackup(args);
     }
-    if (kind.startsWith("media_") || kind.startsWith("download_"))
-      return providerOperation(args);
     if (!enabled)
       return callBackup(args);
+    if (kind.startsWith("media_") || kind.startsWith("download_"))
+      return providerOperation(args);
     Object result;
     try {
       result = callBackup(args);
@@ -208,6 +208,7 @@ public final class FileMonitorHooks extends Hooker {
       throw new SecurityException("Root monitor service required");
     Bundle extras = (Bundle) args[3];
     if (MonitorProtocol.ATTACH.equals(methodName)) {
+      Hooker.refreshConfig();
       IBinder next = extras.getBinder("service");
       if (service != next) {
         if (service != null && serviceDeath != null)
@@ -229,6 +230,10 @@ public final class FileMonitorHooks extends Hooker {
       result.putInt("fuse_hooks", fuseHooks);
       return result;
     }
+    if ("rules".equals(extras.getString("command"))) {
+      Hooker.refreshConfig();
+      return Bundle.EMPTY;
+    }
     IBinder target = service;
     if (target == null)
       throw new IllegalStateException("Monitor service is unavailable");
@@ -240,6 +245,7 @@ public final class FileMonitorHooks extends Hooker {
       target.transact(policy ? MonitorProtocol.RELOAD_POLICY : MonitorProtocol.CLEAR, data, reply, 0);
       reply.readException();
       if (policy) {
+        Hooker.refreshConfig();
         setInitialEnabled(reply.readInt() != 0);
         requestDrain();
       }
@@ -257,6 +263,7 @@ public final class FileMonitorHooks extends Hooker {
   }
 
   private void reportFuse(Object[] args, int status, int returnedUid) {
+    if (!enabled) return;
     int uid = originatingUid(kind, args, returnedUid);
     String path = (String) args[1];
     emit(uid, path, kind.equals("insertFileIfNecessaryForFuse") ? "creat" : "open", status);
@@ -264,7 +271,7 @@ public final class FileMonitorHooks extends Hooker {
 
   private Object providerOperation(Object[] args) throws Throwable {
     int uid = Binder.getCallingUid();
-    if (uid == android.os.Process.myUid() || !enabled || INSIDE_PROVIDER.get())
+    if (uid == android.os.Process.myUid() || INSIDE_PROVIDER.get())
       return callBackup(args);
     INSIDE_PROVIDER.set(true);
     try {
@@ -337,7 +344,7 @@ public final class FileMonitorHooks extends Hooker {
     String path = MonitorProtocol.storagePath(input);
     if (path == null) return;
     int flags = status == 0 ? MonitorProtocol.SUCCESS : MonitorProtocol.FAILED;
-    if (Math.abs(status) == 13 || Math.abs(status) == 1)
+    if (Math.abs(status) == 13 || Math.abs(status) == 1 || Math.abs(status) == android.system.OsConstants.EROFS)
       flags |= MonitorProtocol.BLOCKED;
     if (status == 17 || status == -17)
       flags = MonitorProtocol.EXISTS;

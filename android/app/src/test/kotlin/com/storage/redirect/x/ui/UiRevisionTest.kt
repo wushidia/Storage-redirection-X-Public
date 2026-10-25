@@ -153,6 +153,8 @@ class UiRevisionTest {
 
     @Test
     fun templatesTitleAndBackButtonShareOneToolbarRow() {
+        val repository = com.storage.redirect.x.data.repository.TemplateRepository()
+        repository.saveTemplate(com.storage.redirect.x.data.model.RedirectTemplate(id = "path-layout", name = "Path layout"))
         RenderScene { AppTheme(AppThemeSettings(colorMode = ColorMode.LIGHT)) { TemplatesPage() } }
             .use { scene ->
                 scene.frames()
@@ -168,7 +170,35 @@ class UiRevisionTest {
                         .boundsInRoot
                 assertEquals(title.center.y, back.center.y, 3f)
                 scene.capture("templates-revised")
+                scene.tapTag("template_edit_path-layout")
+                scene.tapTag("template_add_allowed_path")
+                val allowedInput = scene.tag("template_allowed_path_input").boundsInRoot
+                val allowedBrowse = scene.tag("template_allowed_path_input_browse").boundsInRoot
+                assertTrue(allowedBrowse.left >= allowedInput.right)
+                assertEquals(allowedInput.center.y, allowedBrowse.center.y, 3f)
+                scene.capture("template-path-browse-right")
+                scene.tapTag("template_allowed_path_cancel")
+                scene.tapTag("template_add_mapping")
+                val requestInput = scene.tag("template_mapping_request_input").boundsInRoot
+                val requestBrowse = scene.tag("template_mapping_request_input_browse").boundsInRoot
+                val targetInput = scene.tag("template_mapping_final_input").boundsInRoot
+                val targetBrowse = scene.tag("template_mapping_final_input_browse").boundsInRoot
+                assertTrue(requestBrowse.left >= requestInput.right)
+                assertTrue(targetBrowse.left >= targetInput.right)
+                assertEquals(requestInput.left, targetInput.left, 1f)
+                assertEquals(requestInput.right, targetInput.right, 1f)
+                assertEquals(requestInput.center.y, requestBrowse.center.y, 3f)
+                assertEquals(targetInput.center.y, targetBrowse.center.y, 3f)
+                scene.capture("template-mapping-browse-right")
+                scene.tapTag("template_mapping_cancel")
+                scene.tapTag("rule_read_only_paths")
+                scene.tapTag("policy_add")
+                val policyInput = scene.tag("policy_path_input").boundsInRoot
+                val policyBrowse = scene.tag("policy_browse").boundsInRoot
+                assertTrue(policyBrowse.left >= policyInput.right)
+                assertEquals(policyInput.center.y, policyBrowse.center.y, 3f)
             }
+        repository.deleteTemplate("path-layout")
     }
 
     @Test
@@ -198,6 +228,7 @@ class UiRevisionTest {
     @Test
     fun configuredAppsUseMishkaCheckboxesAndSelectionConfirmsAtBottomRight() {
         val source = FakeAppSource()
+        source.gate = kotlinx.coroutines.CompletableDeferred()
         val vm = AppsViewModel(source)
         vm.cacheConfig(0, 0, RedirectConfig().addApp("example.alpha"))
         RenderScene {
@@ -206,6 +237,12 @@ class UiRevisionTest {
             }
         }
             .use { scene ->
+                scene.frames()
+                val loading = scene.tag("apps_loading_indicator").boundsInRoot
+                assertEquals(scene.decor.width / 2f, loading.center.x, 3f)
+                assertTrue(loading.center.y > scene.decor.height * 0.4f)
+                scene.capture("apps-miuix-loading")
+                source.gate?.complete(Unit)
                 scene.frames(80)
                 scene.capture("apps-diagnostic")
                 assertTrue(

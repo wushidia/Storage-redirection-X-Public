@@ -26,6 +26,12 @@ unsafe extern "C" fn refresh_provider_libraries(_env: *mut JNIEnv, _class: jclas
     crate::hook::refresh_provider_libraries();
 }
 
+unsafe extern "C" fn refresh_config(_env: *mut JNIEnv, _class: jclass) {
+    crate::redirect::policy::refresh_shared_uid_cache();
+    crate::hook::refresh_runtime_config_after_disk_change();
+    crate::hook::InterceptHub::instance().refresh_writer_mode();
+}
+
 pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     if env.is_null() || hooker_class.is_null() {
         return false;
@@ -35,6 +41,11 @@ pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     }
 
     let methods = [
+        JNINativeMethod {
+            name: c"refreshConfig".as_ptr() as *mut _,
+            signature: c"()V".as_ptr() as *mut _,
+            fnPtr: refresh_config as *mut _,
+        },
         JNINativeMethod {
             name: c"refreshProviderLibraries".as_ptr() as *mut _,
             signature: c"()V".as_ptr() as *mut _,

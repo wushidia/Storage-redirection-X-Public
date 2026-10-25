@@ -85,6 +85,14 @@ impl SettingsHub {
         }
         self.is_fuse_fixer_enabled
             .store(loaded_state.is_fuse_fixer_enabled, Ordering::Relaxed);
+        self.has_read_only_rules.store(
+            loaded_state.apps.values().any(|app| {
+                app.user_profiles
+                    .values()
+                    .any(|profile| profile.is_enabled && !profile.read_only_paths.is_empty())
+            }),
+            Ordering::Relaxed,
+        );
         *state = loaded_state;
         self.bump_config_version();
         true
@@ -178,6 +186,14 @@ impl SettingsHub {
         }
         self.is_fuse_fixer_enabled
             .store(loaded_state.is_fuse_fixer_enabled, Ordering::Relaxed);
+        self.has_read_only_rules.store(
+            loaded_state.apps.values().any(|app| {
+                app.user_profiles
+                    .values()
+                    .any(|profile| profile.is_enabled && !profile.read_only_paths.is_empty())
+            }),
+            Ordering::Relaxed,
+        );
         *state = loaded_state;
         self.bump_config_version();
         true

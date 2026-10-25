@@ -1,10 +1,12 @@
 package com.storage.redirect.x.data.repository
 
+import android.util.Base64
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.storage.redirect.x.data.model.AppRedirectConfig
 import com.storage.redirect.x.data.model.RedirectConfig
+import com.storage.redirect.x.data.model.validateMappings
 import com.storage.redirect.x.data.service.RootService
 import com.storage.redirect.x.util.Logger
 import com.storage.redirect.x.util.Paths
@@ -16,6 +18,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val FILE_DUMP_MARKER = "@@SRX@@"
+
+data class AutoRedirectPolicy(val isEnabled: Boolean = false, val templateId: String = "")
 
 // 配置仓库：读取/写入全局配置和应用配置
 class ConfigRepository {
@@ -76,7 +80,7 @@ class ConfigRepository {
             }
         }
         Logger.debug("Config saved")
-        true
+        notifyRulesReload(config.userId)
     }
 
     // 仅保存受影响的应用配置，避免小改动触发整份配置重写
@@ -107,7 +111,7 @@ class ConfigRepository {
                 }
             }
             Logger.debug("Partial app configs saved")
-            true
+            notifyRulesReload(config.userId)
         }
 
     suspend fun setFuseFixerEnabled(isEnabled: Boolean): Boolean =
@@ -117,37 +121,23 @@ class ConfigRepository {
 
     suspend fun readFuseFixerEnabled(): Boolean = readGlobalConfig().isFuseFixerEnabled
 
+    suspend fun readAutoRedirectPolicy(): AutoRedirectPolicy = readGlobalConfig().autoRedirectPolicy
+
+    suspend fun setAutoRedirectPolicy(policy: AutoRedirectPolicy): Boolean = withContext(Dispatchers.IO) {
+        if (policy.isEnabled && !TemplateRepository().syncToModule()) return@withContext false
+        writeGlobalConfig(autoRedirectPolicy = policy)
+    }
+
     // 保留其他用户；最后一个用户删除后，将文件移入备份目录。
     suspend fun deleteAppConfigs(userId: Int, packageNames: Collection<String>, backupDir: String): Boolean =
         withContext(Dispatchers.IO) {
             for (packageName in packageNames.toSortedSet()) {
-                val path = Paths.appConfigFile(packageName)
-                val content = RootService.readFile(path) ?: return@withContext false
-                val json = try {
-                    JsonParser.parseString(content).asJsonObject
-                } catch (e: Exception) {
-                    Logger.error("Parse app config failed: $packageName", e)
-                    return@withContext false
-                }
-                val users = json.getAsJsonObject("users") ?: return@withContext false
-                if (users.remove(userId.toString()) == null) continue
-                if (users.size() == 0) {
-                    if (!archiveAppConfigFiles(packageName, backupDir)) return@withContext false
-                    continue
-                }
-                if (!writeAppConfigJson(packageName, json)) return@withContext false
+                val result = RootService.packageCommand("remove-profile", Paths.CONFIG_DIR, packageName,
+                    userId.toString(), backupDir)
+                if (!result.isSuccess) return@withContext false
             }
             true
         }
-
-    private suspend fun archiveAppConfigFiles(packageName: String, backupDir: String): Boolean {
-        val path = Paths.appConfigFile(packageName)
-        if (!RootService.runCommand("mv '$path' '$backupDir/$packageName.removed.json'").isSuccess) return false
-        val sharedPath = Paths.sharedAppConfigFile(packageName)
-        return RootService.runCommand(
-            "if [ -e '$sharedPath' ]; then mv '$sharedPath' '$backupDir/$packageName.shared.removed.json'; fi"
-        ).isSuccess
-    }
 
     suspend fun readFileMonitorEnabled(): Boolean = readGlobalConfig().isFileMonitorEnabled.also {
         publishMonitorEnabled(it)
@@ -177,6 +167,10 @@ class ConfigRepository {
                 fileMonitorRetentionSeconds =
                     json.get("file_monitor_retention_seconds")?.asLong?.takeIf { it >= 0 }
                         ?: 604800L,
+                autoRedirectPolicy = AutoRedirectPolicy(
+                    json.get("auto_enable_redirect_for_new_apps")?.asBoolean ?: false,
+                    json.get("auto_enable_new_apps_template_id")?.asString.orEmpty(),
+                ),
             )
         } catch (_: Exception) {
             GlobalConfig()
@@ -241,6 +235,7 @@ class ConfigRepository {
         isFileMonitorEnabled: Boolean? = null,
         isFuseFixerEnabled: Boolean? = null,
         retentionSeconds: Long? = null,
+        autoRedirectPolicy: AutoRedirectPolicy? = null,
     ): Boolean {
         return globalWriteMutex.withLock {
             if (!ensureConfigDir()) {
@@ -254,6 +249,10 @@ class ConfigRepository {
                     isFuseFixerEnabled,
                     retentionSeconds,
                 )
+            if (autoRedirectPolicy != null) {
+                globalJson.addProperty("auto_enable_redirect_for_new_apps", autoRedirectPolicy.isEnabled)
+                globalJson.addProperty("auto_enable_new_apps_template_id", autoRedirectPolicy.templateId)
+            }
             val content = gson.toJson(globalJson) + "\n"
             val temporary = "${Paths.GLOBAL_CONFIG_FILE}.tmp"
             val isSaved =
@@ -265,9 +264,7 @@ class ConfigRepository {
             if (isSaved) {
                 mirrorSharedFile(Paths.SHARED_CONFIG_DIR, Paths.SHARED_GLOBAL_CONFIG_FILE, content)
                 if (isFileMonitorEnabled != null) {
-                    val applied = RootService.runCommand(
-                        "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control monitor-policy && exit 0; done; exit 1"
-                    ).isSuccess
+                    val applied = notifyPolicyReload()
                     if (!applied) return@withLock false
                     publishMonitorEnabled(globalJson.get("file_monitor_enabled").asBoolean)
                 }
@@ -275,6 +272,14 @@ class ConfigRepository {
             isSaved
         }
     }
+
+    private suspend fun notifyPolicyReload(): Boolean = RootService.runCommand(
+        "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control monitor-policy && exit 0; done; exit 1"
+    ).isSuccess
+
+    private suspend fun notifyRulesReload(userId: Int): Boolean = RootService.runCommand(
+        "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control rules:$userId && exit 0; done; exit 1"
+    ).isSuccess
 
     // 确保配置目录存在
     private suspend fun ensureConfigDir(): Boolean {
@@ -290,42 +295,14 @@ class ConfigRepository {
 
     // 写入单个应用配置，保留其他用户的配置
     private suspend fun writeAppConfigFile(config: AppRedirectConfig, userId: Int): Boolean {
-        val path = Paths.appConfigFile(config.packageName)
-
-        val mergedJson = try {
-            val existing = RootService.readFile(path)
-            if (!existing.isNullOrBlank()) {
-                JsonParser.parseString(existing).asJsonObject
-            } else {
-                JsonObject()
-            }
-        } catch (_: Exception) {
-            JsonObject()
+        if (validateMappings(config.pathMappings, userId, config.packageName) != null) {
+            Logger.warn("Mapping graph rejected for ${config.packageName}")
+            return false
         }
-
-        mergedJson.remove("package")
-        mergedJson.remove("enabled")
-        mergedJson.remove("allowed_real_paths")
-
-        val usersObj = mergedJson.getAsJsonObject("users") ?: JsonObject()
-        usersObj.add(userId.toString(), config.toUserJson())
-        mergedJson.add("users", usersObj)
-
-        return writeAppConfigJson(config.packageName, mergedJson)
-    }
-
-    private suspend fun writeAppConfigJson(packageName: String, json: JsonObject): Boolean {
-        val path = Paths.appConfigFile(packageName)
-        val content = gson.toJson(json) + "\n"
-        val isSaved = RootService.writeFile(path, content)
-        if (isSaved) {
-            mirrorSharedFile(
-                Paths.SHARED_APPS_CONFIG_DIR,
-                Paths.sharedAppConfigFile(packageName),
-                content,
-            )
-        }
-        return isSaved
+        val profile = Base64.encodeToString(config.toUserJson().toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val result = RootService.packageCommand("write-profile", Paths.CONFIG_DIR, config.packageName,
+            userId.toString(), profile)
+        return result.isSuccess
     }
 
     private suspend fun mirrorSharedFile(
@@ -352,6 +329,7 @@ class ConfigRepository {
         val isFileMonitorEnabled: Boolean = true,
         val isFuseFixerEnabled: Boolean = false,
         val fileMonitorRetentionSeconds: Long = 604800L,
+        val autoRedirectPolicy: AutoRedirectPolicy = AutoRedirectPolicy(),
     )
 
     companion object {

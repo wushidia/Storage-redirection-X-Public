@@ -7,6 +7,16 @@ use std::sync::atomic::Ordering;
 const SELF_PACKAGE_NAME: &str = "com.storage.redirect.x";
 
 impl SettingsHub {
+    pub fn get_user_profile(&self, package_name: &str, app_uid: i32) -> Option<super::UserProfile> {
+        let state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        state
+            .apps
+            .get(package_name)?
+            .user_profiles
+            .get(&platform::user_id_from_uid(app_uid))
+            .cloned()
+    }
+
     pub fn is_file_monitor_enabled(&self) -> bool {
         let state = self.state.lock().unwrap_or_else(|err| err.into_inner());
         state.is_file_monitor_enabled
@@ -153,6 +163,15 @@ impl SettingsHub {
             }
         }
         false
+    }
+
+    pub fn has_enabled_redirect_apps(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        state.is_loaded
+            && state
+                .apps
+                .values()
+                .any(|app| app.user_profiles.values().any(|profile| profile.is_enabled))
     }
 
     pub fn get_app_count(&self) -> usize {

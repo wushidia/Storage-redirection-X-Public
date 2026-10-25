@@ -2,3 +2,4 @@
 -keepattributes Signature
 -keepattributes *Annotation*
 -keep class com.storage.redirect.x.data.model.** { *; }
+-keep class org.srx.packages.PackageQueryMain { public static void main(java.lang.String[]); }

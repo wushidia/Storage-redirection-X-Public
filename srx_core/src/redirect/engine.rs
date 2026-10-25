@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const REDIRECT_SLOW_MS: i64 = 10;
 const REDIRECT_SAMPLE_STEP: u64 = 8192;
 static REDIRECT_DECISION_COUNT: AtomicU64 = AtomicU64::new(0);
+static REDIRECT_TIMING_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[inline]
 pub(super) fn should_log_step(count: u64, step: u64) -> bool {
@@ -19,7 +20,15 @@ pub(super) fn should_log_step(count: u64, step: u64) -> bool {
 
 // 根据进程身份决策路径重定向，系统代写进程使用按调用方映射
 pub fn process_redirect_path(hub: &InterceptHub, pathname: &str) -> RedirectDecision {
-    let perf_started_ms = paths::monotonic_ms();
+    let perf_started_ms = if log::log_enabled!(log::Level::Debug)
+        && should_log_step(
+            REDIRECT_TIMING_COUNT.fetch_add(1, Ordering::Relaxed) + 1,
+            64,
+        ) {
+        paths::monotonic_ms()
+    } else {
+        0
+    };
     let self_uid = unsafe { libc::getuid() as i32 };
     let package_name = hub.get_package_name();
     let is_shared_uid = policy::is_shared_uid_process(self_uid);
@@ -63,6 +72,9 @@ fn log_redirect_perf(
     started_ms: i64,
     decision: &RedirectDecision,
 ) {
+    if started_ms == 0 {
+        return;
+    }
     let total_ms = paths::monotonic_ms().saturating_sub(started_ms);
     if !should_log_redirect_perf(total_ms) {
         return;

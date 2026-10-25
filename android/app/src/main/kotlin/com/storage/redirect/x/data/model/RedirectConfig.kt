@@ -51,6 +51,8 @@ data class RedirectConfig(
         val cleanedConfig = config.copy(
             allowedRealPaths = cleanedPaths,
             pathMappings = cleanedMappings,
+            sandboxedPaths = config.sandboxedPaths.mapNotNull { normalizeAllowedPath(it) }.distinct().sorted(),
+            readOnlyPaths = config.readOnlyPaths.mapNotNull(::normalizePolicyPath).distinct().sorted(),
         )
 
         val newConfigs = appConfigs
@@ -146,13 +148,16 @@ data class RedirectConfig(
             return if (isExcluded) "!$body" else body
         }
 
-        // 标准化映射路径：仅接受普通相对路径，不支持 ! 和通配符
+        // 映射允许 namespace 绝对路径与请求通配；! 仍只用于路径策略。
         fun normalizeMappingPath(raw: String): String? {
+            return (validateMappingPath(raw) as? PathValidationResult.Valid)?.normalized
+        }
+
+        fun normalizePolicyPath(raw: String): String? {
             val value = raw.trim()
-            if (value.isEmpty()) return null
-            if (value.startsWith("!")) return null
-            if (containsWildcard(value)) return null
-            return normalizeRelativePath(value)
+            val isExcluded = value.startsWith('!')
+            val path = normalizeMappingPath(if (isExcluded) value.drop(1).trimStart() else value) ?: return null
+            return if (isExcluded) "!$path" else path
         }
 
         // 校验真实路径规则：允许 ! 前缀和通配符
@@ -182,7 +187,7 @@ data class RedirectConfig(
             return PathValidationResult.Valid(normalized)
         }
 
-        // 校验映射路径：不允许 ! 前缀和通配符
+        // 仅拒绝真实路径边界，保留绝对 namespace 路径和通配语义。
         fun validateMappingPath(raw: String): PathValidationResult {
             val value = raw.trim()
             if (value.isEmpty()) {
@@ -191,10 +196,13 @@ data class RedirectConfig(
             if (value.startsWith("!")) {
                 return PathValidationResult.ExclusionNotAllowed
             }
-            if (containsWildcard(value)) {
-                return PathValidationResult.WildcardNotAllowed
+            val segments = value.split('/').filter { it.isNotEmpty() }
+            if (segments.isEmpty()) return PathValidationResult.Empty
+            if (segments.any { it == "." || it == ".." } || '\u0000' in value) {
+                return PathValidationResult.Traversal
             }
-            return validateRelativePath(value)
+            val prefix = if (value.startsWith('/')) "/" else ""
+            return PathValidationResult.Valid(prefix + segments.joinToString("/"))
         }
 
         private fun validateRelativePath(raw: String): PathValidationResult {

@@ -8,7 +8,6 @@ import com.storage.redirect.x.data.cache.AppPreferences
 import com.storage.redirect.x.data.model.*
 import com.storage.redirect.x.data.provider.AppCatalogSource
 import com.storage.redirect.x.data.repository.*
-import com.storage.redirect.x.data.service.RootService
 import com.storage.redirect.x.data.service.SystemUser
 import kotlinx.collections.immutable.*
 import kotlinx.coroutines.*
@@ -18,7 +17,7 @@ import kotlinx.coroutines.flow.*
 data class AppsCatalogState(
     val apps: ImmutableList<AppInfo> = persistentListOf(),
     val icons: ImmutableMap<String, Drawable> = persistentMapOf(),
-    val users: ImmutableList<SystemUser> = persistentListOf(SystemUser(0, "Owner")),
+    val users: ImmutableList<SystemUser> = persistentListOf(SystemUser(android.os.Process.myUid() / 100000, "")),
     val userIndex: Int = 0,
     val query: String = "",
     val showSystemApps: Boolean = AppPreferences.getBoolean("apps_show_system", false),
@@ -29,6 +28,7 @@ data class AppsCatalogState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val isConfigLoading: Boolean = true,
+    val catalogUserId: Int? = null,
     val configUserId: Int? = null,
     val configVersion: Int? = null,
     val redirectedPackages: PersistentSet<String> = persistentSetOf(),
@@ -47,6 +47,8 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
     private var timeJob: Job? = null
     private var generation = 0
     private var timesLoaded = false
+    private val catalogs = mutableMapOf<Int, Pair<ImmutableList<AppInfo>, ImmutableMap<String, Drawable>>>()
+    private val selectedUserId: Int get() = state.value.users[state.value.userIndex].id
     private val iconJobs = mutableMapOf<String, Job>()
     private val iconDispatcher = Dispatchers.IO.limitedParallelism(2)
 
@@ -64,7 +66,7 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
         state
             .map {
                 ListInput(it.apps, it.query, it.showSystemApps, it.redirectedFirst,
-                    it.sortByName, it.isConfigLoading, it.redirectedPackages)
+                    it.sortByName, it.isConfigLoading || it.catalogUserId != it.configUserId, it.redirectedPackages)
             }
             .distinctUntilChanged()
             .map { input ->
@@ -99,23 +101,31 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
     }
 
     private fun loadApps(refresh: Boolean) {
+        loadJob?.cancel()
+        val userId = selectedUserId
+        val requestGeneration = ++generation
         loadJob = viewModelScope.launch {
             state.update { it.copy(isRefreshing = refresh, error = null) }
-            val requestGeneration = ++generation
             timeJob?.cancel()
             timesLoaded = false
             iconJobs.values.toList().forEach { it.cancel() }
             iconJobs.clear()
             try {
-                val apps = source.getInstalledApps()
+                val cached = if (!refresh) catalogs[userId] else null
+                val apps = cached?.first ?: source.getInstalledApps(userId, refresh)
+                if (requestGeneration != generation) return@launch
+                sharedUidRepo.update(userId, apps)
                 if (requestGeneration == generation)
                     state.update {
                         it.copy(
                             apps = apps,
-                            icons = persistentMapOf(),
+                            icons = cached?.second ?: persistentMapOf(),
+                            catalogUserId = userId,
+                            sharedUidPackages = sharedUidRepo.allSharedUidPackages(userId).toPersistentSet(),
                             iconGeneration = requestGeneration,
                         )
                     }
+                catalogs[userId] = apps to state.value.icons
                 if (!state.value.sortByName) ensureInstallTimes()
             } catch (e: CancellationException) {
                 throw e
@@ -127,7 +137,8 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
                     )
                 }
             } finally {
-                state.update { it.copy(isLoading = false, isRefreshing = false) }
+                if (requestGeneration == generation)
+                    state.update { it.copy(isLoading = false, isRefreshing = false) }
             }
         }
     }
@@ -135,14 +146,17 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
     fun requestIcon(packageName: String) {
         if (packageName in state.value.icons || packageName in iconJobs) return
         val requestGeneration = generation
+        val userId = selectedUserId
         val job =
             viewModelScope.launch(start = CoroutineStart.LAZY) {
                 val currentJob = coroutineContext.job
                 try {
-                    val icon = withContext(iconDispatcher) { source.getIcon(packageName) }
+                    val icon = withContext(iconDispatcher) { source.getIcon(packageName, userId) }
                     if (icon != null && requestGeneration == generation)
                         state.update {
-                            it.copy(icons = it.icons.toPersistentMap().putting(packageName, icon))
+                            val icons = it.icons.toPersistentMap().putting(packageName, icon)
+                            catalogs[userId] = it.apps to icons
+                            it.copy(icons = icons)
                         }
                 } catch (e: CancellationException) {
                     throw e
@@ -159,25 +173,25 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
     fun ensureUsersLoaded(force: Boolean = false) {
         if (usersJob?.isActive == true || (!force && usersJob != null)) return
         usersJob = viewModelScope.launch {
-            val users = RootService.getSystemUsers().toPersistentList()
-            state.update {
-                it.copy(
-                    users =
-                        users
-                            .ifEmpty { persistentListOf(SystemUser(0, "Owner")) }
-                            .toPersistentList(),
-                    userIndex = it.userIndex.coerceAtMost((users.size - 1).coerceAtLeast(0)),
-                )
+            try {
+                val selected = selectedUserId
+                val users = source.getUsers()
+                check(users.isNotEmpty()) { "Package API returned no Android users" }
+                val index = users.indexOfFirst { it.id == selected }.coerceAtLeast(0)
+                state.update { it.copy(users = users, userIndex = index) }
+                if (selected != selectedUserId) loadApps(false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                state.update { it.copy(error = e.message ?: e.javaClass.simpleName) }
             }
-            sharedUidRepo.load()
-            state.update { it.copy(sharedUidPackages = sharedUidRepo.allSharedUidPackages().toPersistentSet()) }
         }
     }
 
     fun cachedConfig(userId: Int): RedirectConfig? = configs[userId]?.second
 
     suspend fun configFor(userId: Int, version: Int, force: Boolean = false): RedirectConfig {
-        state.update { it.copy(isConfigLoading = true) }
+        if (userId == selectedUserId) state.update { it.copy(isConfigLoading = true) }
         val cached = configs[userId]
         val config =
             if (!force && cached?.first == version) cached.second else configRepo.load(userId)
@@ -187,6 +201,7 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
 
     fun cacheConfig(userId: Int, version: Int, config: RedirectConfig) {
         configs[userId] = version to config
+        if (userId != selectedUserId) return
         state.update {
             it.copy(isConfigLoading = false, configUserId = userId, configVersion = version,
                 redirectedPackages = config.redirectApps.toPersistentSet())
@@ -198,10 +213,11 @@ class AppsViewModel(private val source: AppCatalogSource) : ViewModel() {
     }
 
     fun selectUser(index: Int) {
-        state.update {
-            val target = index.coerceIn(it.users.indices)
-            if (target == it.userIndex) it else it.copy(userIndex = target, isConfigLoading = true)
-        }
+        val target = index.coerceIn(state.value.users.indices)
+        if (target == state.value.userIndex) return
+        state.update { it.copy(userIndex = target, isConfigLoading = true, isLoading = true,
+            apps = persistentListOf(), icons = persistentMapOf(), sharedUidPackages = persistentSetOf()) }
+        loadApps(false)
     }
 
     fun setShowSystemApps(value: Boolean) {

@@ -1,7 +1,8 @@
 mod boot;
 mod companion;
 mod companion_mount;
-mod companion_request;
+pub(crate) mod companion_request;
+mod mount_result;
 mod specialize_post;
 mod specialize_pre;
 
@@ -21,6 +22,8 @@ pub struct RuntimeFlow {
     should_monitor: bool,
     is_mount_applied: bool,
     is_mount_request_sent: bool,
+    // 伴生进程挂载请求 fd：pre 发送后保持打开，post 读取结果后关闭（-1 表示无）
+    companion_fd: libc::c_int,
     is_system_writer_hook_redirect: bool,
     should_install_fuse_fixer: bool,
     should_skip_post_work: bool,
@@ -45,6 +48,7 @@ impl RuntimeFlow {
             should_monitor: false,
             is_mount_applied: false,
             is_mount_request_sent: false,
+            companion_fd: -1,
             is_system_writer_hook_redirect: false,
             should_install_fuse_fixer: false,
             should_skip_post_work: false,

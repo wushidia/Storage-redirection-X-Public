@@ -9,7 +9,10 @@ data class AppRedirectConfig(
     val packageName: String,
     val isEnabled: Boolean = true,
     val allowedRealPaths: List<String> = emptyList(),
-    val pathMappings: List<StoragePathMapping> = emptyList()
+    val pathMappings: List<StoragePathMapping> = emptyList(),
+    val isMappingModeOnly: Boolean = false,
+    val sandboxedPaths: List<String> = emptyList(),
+    val readOnlyPaths: List<String> = emptyList(),
 ) {
     val isActive: Boolean get() = isEnabled
 
@@ -17,6 +20,13 @@ data class AppRedirectConfig(
     fun toUserJson(): JsonObject {
         val obj = JsonObject()
         obj.addProperty("enabled", isEnabled)
+        if (isMappingModeOnly) obj.addProperty("mapping_mode_only", true)
+        if (sandboxedPaths.isNotEmpty()) {
+            obj.add("sandboxed_paths", JsonArray().apply { sandboxedPaths.forEach { add(it) } })
+        }
+        if (readOnlyPaths.isNotEmpty()) {
+            obj.add("read_only_paths", JsonArray().apply { readOnlyPaths.forEach { add(it) } })
+        }
         if (allowedRealPaths.isNotEmpty()) {
             val arr = JsonArray()
             allowedRealPaths.forEach { arr.add(it) }
@@ -56,7 +66,13 @@ data class AppRedirectConfig(
                 isEnabled = isEnabled,
                 allowedRealPaths = allowedRealPaths,
                 pathMappings = mappings.sortedBy { it.requestPath },
+                isMappingModeOnly = json.get("mapping_mode_only")?.asBoolean ?: false,
+                sandboxedPaths = readPaths(json, "sandboxed_paths"),
+                readOnlyPaths = readPaths(json, "read_only_paths"),
             )
         }
+
+        private fun readPaths(json: JsonObject, name: String): List<String> =
+            json.getAsJsonArray(name)?.map { it.asString.trim() }?.filter { it.isNotEmpty() }.orEmpty()
     }
 }

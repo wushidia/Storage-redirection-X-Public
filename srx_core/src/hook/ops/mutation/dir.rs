@@ -29,6 +29,10 @@ pub unsafe extern "C" fn hooked_mkdir(pathname: *const c_char, mode: mode_t) -> 
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
             }
 
+            if crate::hook::readonly::denies_at(hub, AT_FDCWD, pathname) {
+                return -1;
+            }
+
             handle_mkdir_like(hub, "mkdir", AT_FDCWD, pathname, mode, |call_path| {
                 runtime::call_prev(
                     self_ptr,
@@ -68,6 +72,10 @@ pub unsafe extern "C" fn hooked_mkdirat(
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
             }
 
+            if crate::hook::readonly::denies_at(hub, dirfd, pathname) {
+                return -1;
+            }
+
             handle_mkdir_like(hub, "mkdirat", dirfd, pathname, mode, |call_path| {
                 runtime::call_prev(
                     self_ptr,
@@ -100,6 +108,10 @@ pub unsafe extern "C" fn hooked_unlink(pathname: *const c_char) -> c_int {
             hub.increment_unlink_calls();
             if runtime::should_resolve_caller_context(hub) {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_at(hub, AT_FDCWD, pathname) {
+                return -1;
             }
 
             handle_unlink_like(hub, "unlink", AT_FDCWD, pathname, -1, false, |call_path| {
@@ -141,6 +153,10 @@ pub unsafe extern "C" fn hooked_unlinkat(
             hub.increment_unlink_calls();
             if runtime::should_resolve_caller_context(hub) {
                 crate::hook::caller::update_caller_package_for_current_thread(hub);
+            }
+
+            if crate::hook::readonly::denies_at(hub, dirfd, pathname) {
+                return -1;
             }
 
             handle_unlink_like(hub, "unlinkat", dirfd, pathname, flags, true, call_original)

@@ -1,11 +1,11 @@
 use super::stats::InterceptHub;
 use crate::monitor::{AuditTrail, OpKind};
-use libc::{O_APPEND, O_CREAT, O_RDWR, O_TMPFILE, O_TRUNC, O_WRONLY};
+use libc::{O_APPEND, O_CREAT, O_PATH, O_RDWR, O_TMPFILE, O_TRUNC, O_WRONLY};
 
 const SHOULD_MONITOR_LOG_DIR_CREATE: bool = true;
 
 pub fn has_write_intent_flags(flags: i32) -> bool {
-    if flags < 0 {
+    if flags < 0 || flags & O_PATH != 0 {
         return false;
     }
 

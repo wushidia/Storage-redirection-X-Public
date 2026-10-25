@@ -16,9 +16,7 @@ use crate::redirect::{PathRouter, policy};
 use crate::zygisk::{abi, jni};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use companion::{
-    build_companion_request_payload, clear_mount_status_marker, send_companion_request_payload,
-};
+use companion::{build_companion_request_payload, send_companion_request_payload};
 use diagnostics::{
     install_java_hook, log_allowed_real_paths, log_excluded_real_paths, log_path_mappings,
     should_bypass_file_monitor_ui_process,
@@ -50,6 +48,10 @@ impl RuntimeFlow {
     }
 
     fn reset_specialize_state(&mut self) {
+        if self.companion_fd >= 0 {
+            unsafe { libc::close(self.companion_fd) };
+            self.companion_fd = -1;
+        }
         self.app_data_dir.clear();
         self.should_redirect = false;
         self.should_monitor = false;
@@ -215,7 +217,6 @@ impl RuntimeFlow {
 
         let install_monitor_bridge = platform::android_api_level() >= 30
             && self.app_uid >= 0
-            && self.app_uid < 100000
             && self.app_uid != 1000
             && !matches!(
                 self.package_name.as_str(),
@@ -373,7 +374,10 @@ impl RuntimeFlow {
         let allowed_real_paths = config.get_allowed_real_paths(&self.package_name, self.app_uid);
         let excluded_real_paths = config.get_excluded_real_paths(&self.package_name, self.app_uid);
         let mut path_mappings = config.get_path_mappings(&self.package_name, self.app_uid);
-        let mut is_mapping_mode_only = false;
+        let options = config
+            .get_user_profile(&self.package_name, self.app_uid)
+            .unwrap_or_default();
+        let mut is_mapping_mode_only = options.is_mapping_mode_only;
 
         log::info!(
             "config sum pkg={} allow={} excl={} map={}",
@@ -415,29 +419,27 @@ impl RuntimeFlow {
             jni::get_jstring_utf8(self.env, unsafe { *args.app_data_dir })
         };
 
-        if !self.is_system_writer_hook_redirect {
-            clear_mount_status_marker(&self.app_data_dir, self.app_pid);
+        let profile = crate::config::UserProfile {
+            is_enabled: true,
+            is_mapping_mode_only,
+            allowed_real_paths: allowed_real_paths.clone(),
+            excluded_real_paths: excluded_real_paths.clone(),
+            sandboxed_paths: options.sandboxed_paths,
+            read_only_paths: options.read_only_paths,
+            path_mappings: path_mappings.clone(),
         }
-
-        if self.is_system_writer_hook_redirect {
-            PathRouter::instance().configure(
-                &self.package_name,
-                self.app_uid,
-                &redirect_base,
-                &[],
-                &[],
-                &[],
-            );
-        } else {
-            PathRouter::instance().configure(
-                &self.package_name,
-                self.app_uid,
-                &redirect_base,
-                &allowed_real_paths,
-                &excluded_real_paths,
-                &path_mappings,
-            );
-        }
+        .resolved(user_id, &self.app_data_dir, &redirect_base);
+        let empty_profile = crate::config::UserProfile::default();
+        PathRouter::instance().configure(
+            &self.package_name,
+            self.app_uid,
+            &redirect_base,
+            if self.is_system_writer_hook_redirect {
+                &empty_profile
+            } else {
+                &profile
+            },
+        );
         metrics.route_ms = monotonic_ms().saturating_sub(route_config_started_ms);
         metrics.allow_count = allowed_real_paths.len();
         metrics.excluded_count = excluded_real_paths.len();
@@ -478,9 +480,7 @@ impl RuntimeFlow {
             &self.package_name,
             &self.app_data_dir,
             &redirect_base,
-            &allowed_real_paths,
-            &path_mappings,
-            is_mapping_mode_only,
+            &profile,
         );
         metrics.payload_ms = monotonic_ms().saturating_sub(payload_started_ms);
         metrics.payload_bytes = payload.len();
@@ -490,7 +490,8 @@ impl RuntimeFlow {
         }
 
         let send_started_ms = monotonic_ms();
-        self.is_mount_request_sent = send_companion_request_payload(self.api.as_ref(), &payload);
+        self.companion_fd = send_companion_request_payload(self.api.as_ref(), &payload);
+        self.is_mount_request_sent = self.companion_fd >= 0;
         metrics.send_ms = monotonic_ms().saturating_sub(send_started_ms);
         self.log_specialize_exit("mount_request", is_system_writer, perf_started_ms, metrics);
     }

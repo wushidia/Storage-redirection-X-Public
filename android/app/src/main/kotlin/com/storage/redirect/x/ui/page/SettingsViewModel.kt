@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.storage.redirect.x.data.repository.BackupExportResult
 import com.storage.redirect.x.data.repository.BackupRestoreRepository
 import com.storage.redirect.x.data.repository.ConfigRepository
+import com.storage.redirect.x.data.repository.AutoRedirectPolicy
 import com.storage.redirect.x.data.repository.RestoreResult
 import com.storage.redirect.x.data.service.RootService
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,6 +30,7 @@ data class SettingsUiState(
     val isFuseFixerEnabled: Boolean = false,
     val isFileMonitorEnabled: Boolean = true,
     val fileMonitorRetentionSeconds: Long = 604800L,
+    val autoRedirectPolicy: AutoRedirectPolicy = AutoRedirectPolicy(),
 )
 
 sealed class SettingsUiEvent {
@@ -69,7 +71,8 @@ class SettingsViewModel(
                 refreshFuseFixerEnabled()
                 configRepo.readFileMonitorEnabled()
                 val retention = configRepo.readFileMonitorRetention()
-                _uiState.update { it.copy(fileMonitorRetentionSeconds = retention) }
+                val policy = configRepo.readAutoRedirectPolicy()
+                _uiState.update { it.copy(fileMonitorRetentionSeconds = retention, autoRedirectPolicy = policy) }
             }
         }
     }
@@ -138,6 +141,17 @@ class SettingsViewModel(
             _uiState.update { it.copy(isWorking = true) }
             val saved = configRepo.setFileMonitorEnabled(enabled)
             _uiState.update { it.copy(isWorking = false) }
+            if (!saved) _events.emit(SettingsUiEvent.SaveFailed)
+        }
+    }
+
+    fun setAutoRedirectPolicy(policy: AutoRedirectPolicy) {
+        if (_uiState.value.hasRoot != true || _uiState.value.isWorking) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isWorking = true) }
+            val saved = configRepo.setAutoRedirectPolicy(policy)
+            _uiState.update { it.copy(isWorking = false,
+                autoRedirectPolicy = if (saved) policy else it.autoRedirectPolicy) }
             if (!saved) _events.emit(SettingsUiEvent.SaveFailed)
         }
     }

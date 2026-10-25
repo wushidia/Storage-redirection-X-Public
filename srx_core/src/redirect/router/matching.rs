@@ -57,17 +57,13 @@ pub(super) fn is_allowed_real_path(
 }
 
 pub(super) fn map_path_to_target(mappings: &[PathMapping], path: &str) -> Option<String> {
-    for mapping in mappings {
-        if path == mapping.request_path {
-            return Some(mapping.final_path.clone());
-        }
-        let prefix = format!("{}/", mapping.request_path);
-        if paths::starts_with(path, &prefix) {
-            let suffix = &path[mapping.request_path.len()..];
-            return Some(format!("{}{}", mapping.final_path, suffix));
+    match crate::domain::resolve_mapping_chain(path, mappings) {
+        Ok(path) => path,
+        Err(error) => {
+            log::warn!("invalid mapping chain: {:?}", error);
+            None
         }
     }
-    None
 }
 
 pub(super) fn generate_redirected_path(

@@ -34,7 +34,8 @@ pub(super) fn resolve_system_writer_context(
     context.merged_writer_mappings = config.get_merged_path_mappings_for_user(app_uid);
     context.has_merged_writer_mappings = !context.merged_writer_mappings.is_empty();
 
-    let has_enabled_apps = config.has_enabled_redirect_apps_for_user(app_uid);
+    // 单实例 MediaProvider 可能同时代写其他用户，具体规则仍按调用者 UID 匹配。
+    let has_enabled_apps = config.has_enabled_redirect_apps();
 
     let is_file_monitor_enabled = config.is_file_monitor_enabled();
     if context.has_merged_writer_mappings || has_enabled_apps {
@@ -44,7 +45,8 @@ pub(super) fn resolve_system_writer_context(
         *should_redirect = false;
         *is_system_writer_hook_redirect = false;
     }
-    if !*should_monitor && context.is_media_provider && is_file_monitor_enabled {
+    if !*should_monitor && app_uid < 100000 && context.is_media_provider && is_file_monitor_enabled
+    {
         *should_monitor = true;
     }
 

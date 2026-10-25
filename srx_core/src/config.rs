@@ -13,12 +13,53 @@ mod raw_scan;
 mod source;
 pub mod watcher;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct UserProfile {
     pub is_enabled: bool,
+    pub is_mapping_mode_only: bool,
     pub allowed_real_paths: Vec<String>,
     pub excluded_real_paths: Vec<String>,
+    pub sandboxed_paths: Vec<String>,
+    pub read_only_paths: Vec<String>,
     pub path_mappings: Vec<PathMapping>,
+}
+
+impl UserProfile {
+    pub fn resolved(&self, user_id: i32, app_data_dir: &str, redirect_target: &str) -> Self {
+        let resolve = |raw: &str| {
+            crate::platform::paths::resolve_user_path(
+                &crate::platform::paths::resolve_placeholders(raw, app_data_dir, redirect_target),
+                user_id,
+            )
+        };
+        let rules = |items: &[String]| {
+            items
+                .iter()
+                .map(|raw| {
+                    if let Some(body) = raw.strip_prefix('!') {
+                        format!("!{}", resolve(body))
+                    } else {
+                        resolve(raw)
+                    }
+                })
+                .collect()
+        };
+        Self {
+            is_enabled: self.is_enabled,
+            is_mapping_mode_only: self.is_mapping_mode_only,
+            allowed_real_paths: rules(&self.allowed_real_paths),
+            excluded_real_paths: rules(&self.excluded_real_paths),
+            sandboxed_paths: rules(&self.sandboxed_paths),
+            read_only_paths: rules(&self.read_only_paths),
+            path_mappings: self
+                .path_mappings
+                .iter()
+                .map(|mapping| {
+                    PathMapping::new(resolve(&mapping.request_path), resolve(&mapping.final_path))
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -63,6 +104,7 @@ pub struct SettingsHub {
     state: Mutex<SettingsState>,
     config_version: AtomicU64,
     is_fuse_fixer_enabled: AtomicBool,
+    has_read_only_rules: AtomicBool,
 }
 
 impl SettingsHub {
@@ -71,11 +113,16 @@ impl SettingsHub {
             state: Mutex::new(SettingsState::new()),
             config_version: AtomicU64::new(0),
             is_fuse_fixer_enabled: AtomicBool::new(false),
+            has_read_only_rules: AtomicBool::new(false),
         }
     }
 
     pub fn instance() -> &'static SettingsHub {
         &SETTINGS_HUB
+    }
+
+    pub fn has_read_only_rules(&self) -> bool {
+        self.has_read_only_rules.load(Ordering::Relaxed)
     }
 
     pub fn config_version(&self) -> u64 {

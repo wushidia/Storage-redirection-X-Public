@@ -248,7 +248,7 @@ fun AppsPage(
         pendingApplyMode = mode
         val sharedPackages =
             targetApps
-                .flatMap { sharedUidRepo.getSharedPackages(it.packageName) }
+                .flatMap { sharedUidRepo.getSharedPackages(it.packageName, config.userId) }
                 .distinct()
                 .filterNot { packageName -> targetApps.any { it.packageName == packageName } }
         sharedPackagesForSelectedApp = sharedPackages
@@ -325,7 +325,7 @@ fun AppsPage(
         var nextConfig = config
         val affectedPackages = linkedSetOf<String>()
         for (targetApp in targetApps) {
-            val sharedPackages = sharedUidRepo.getSharedPackages(targetApp.packageName)
+            val sharedPackages = sharedUidRepo.getSharedPackages(targetApp.packageName, config.userId)
             val result =
                 templateRepo.applyTemplate(
                     nextConfig,

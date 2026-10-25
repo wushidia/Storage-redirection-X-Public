@@ -67,9 +67,7 @@ start_diagnostics_workers() {
   stop_collector_by_pid_file "$MEDIA_STATE_COLLECTOR_PID_FILE"
   stop_collector_by_pid_file "$APP_STATUS_SNAPSHOT_PID_FILE"
   stop_collector_by_pid_file "$CONFIG_EVENT_COLLECTOR_PID_FILE"
-  stop_collector_by_pid_file "$PACKAGE_EVENT_COLLECTOR_PID_FILE"
   start_media_state_collector
   start_app_status_snapshot_collector
   start_config_event_collector
-  start_package_event_collector
 }

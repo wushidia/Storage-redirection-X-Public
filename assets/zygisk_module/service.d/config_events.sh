@@ -29,96 +29,6 @@ is_effective_package_config() {
   return 1
 }
 
-is_package_query_ready() {
-  cmd package list packages 2>/dev/null | grep -q '^package:'
-}
-
-get_package_install_state() {
-  package_name="$1"
-  [ -n "$package_name" ] || {
-    echo "unknown"
-    return 0
-  }
-  cmd package path "$package_name" >/dev/null 2>&1 && {
-    echo "installed"
-    return 0
-  }
-
-  user_ids=$(cmd user list 2>/dev/null | sed -n 's/.*{\([0-9][0-9]*\):.*/\1/p' | sort -u)
-  if [ -z "$user_ids" ]; then
-    echo "unknown"
-    return 0
-  fi
-
-  for user_id in $user_ids; do
-    package_lines=$(cmd package list packages --user "$user_id" "$package_name" 2>/dev/null)
-    query_status=$?
-    if [ "$query_status" -ne 0 ]; then
-      echo "unknown"
-      return 0
-    fi
-    echo "$package_lines" | grep -qx "package:$package_name" && {
-      echo "installed"
-      return 0
-    }
-  done
-
-  echo "missing"
-}
-
-disable_package_config() {
-  package_name="$1"
-  config_file="$APPS_CONFIG_DIR/$package_name.json"
-  tmp_file="$config_file.tmp"
-  [ -f "$config_file" ] || return 1
-  grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$config_file" 2>/dev/null || return 1
-
-  sed 's/"enabled"[[:space:]]*:[[:space:]]*true/"enabled": false/g' "$config_file" > "$tmp_file" 2>/dev/null || {
-    rm -f "$tmp_file"
-    return 1
-  }
-  mv "$tmp_file" "$config_file" || {
-    rm -f "$tmp_file"
-    return 1
-  }
-  chmod 644 "$config_file" 2>/dev/null
-  return 0
-}
-
-sync_uninstalled_app_configs() {
-  [ -d "$APPS_CONFIG_DIR" ] || return 0
-  if ! is_package_query_ready; then
-    log -p w -t Boot "skip uninstalled config sync: package query unavailable"
-    return 0
-  fi
-
-  changed_file="$LOGS_DIR/.uninstalled_config_packages.tmp"
-  : > "$changed_file"
-  refresh_uid_map
-
-  for config_file in "$APPS_CONFIG_DIR"/*.json; do
-    [ -f "$config_file" ] || continue
-    package_name=$(basename "$config_file" .json)
-    [ -n "$package_name" ] || continue
-    is_skipped_package "$package_name" && continue
-    is_effective_package_config "$package_name" || continue
-
-    install_state=$(get_package_install_state "$package_name")
-    if [ "$install_state" = "installed" ] || [ "$install_state" = "unknown" ]; then
-      [ "$install_state" = "unknown" ] && log -p w -t Boot "skip uninstalled config sync for unknown package state: pkg=$package_name"
-      continue
-    fi
-
-    if disable_package_config "$package_name"; then
-      echo "$package_name" >> "$changed_file"
-      log -p i -t Boot "disable config for uninstalled package: pkg=$package_name"
-    fi
-  done
-
-  force_stop_packages_from_file "$changed_file"
-  rm -f "$changed_file"
-}
-
 build_config_state_file() {
   output_file="$1"
   : > "$output_file"
@@ -202,33 +112,6 @@ get_packages_by_uid() {
   awk -F':' -v uid="$target_uid" '$2 == uid { print $1 }' "$SYSTEM_WRITER_UIDS_FILE" 2>/dev/null
 }
 
-get_user_ids() {
-  user_ids=$(cmd user list 2>/dev/null | sed -n 's/.*{\([0-9][0-9]*\):.*/\1/p' | sort -u)
-  if [ -z "$user_ids" ]; then
-    echo "0"
-    return 0
-  fi
-  echo "$user_ids"
-}
-
-force_stop_package_all_users() {
-  package_name="$1"
-  user_ids=$(get_user_ids)
-  for user_id in $user_ids; do
-    am force-stop --user "$user_id" "$package_name" >/dev/null 2>&1
-  done
-}
-
-force_stop_packages_from_file() {
-  package_file="$1"
-  [ -s "$package_file" ] || return 0
-  sort -u -o "$package_file" "$package_file" 2>/dev/null
-  while IFS= read -r package_name; do
-    [ -n "$package_name" ] || continue
-    force_stop_package_all_users "$package_name"
-  done < "$package_file"
-}
-
 handle_config_changes() {
   changed_packages="$1"
   old_state_file="$2"
@@ -274,40 +157,6 @@ handle_config_changes() {
   if [ "$should_refresh_runtime" -eq 1 ]; then
     log -p i -t Boot "config mirrored for hot reload"
   fi
-}
-
-start_package_event_collector() {
-  (
-    mkdir -p "$APPS_CONFIG_DIR"
-    sync_shared_config_dir
-    sync_uninstalled_app_configs
-
-    while true; do
-      watch_args=""
-      [ -f /data/system/packages.xml ] && watch_args="$watch_args /data/system/packages.xml:wcmdn"
-      for user_dir in /data/system/users/*; do
-        [ -d "$user_dir" ] || continue
-        [ -f "$user_dir/package-restrictions.xml" ] && \
-          watch_args="$watch_args $user_dir/package-restrictions.xml:wcmdn"
-      done
-
-      if [ -z "$watch_args" ]; then
-        sleep 30
-        sync_uninstalled_app_configs
-        continue
-      fi
-
-      # shellcheck disable=SC2086
-      inotifyd - $watch_args 2>/dev/null |
-      while IFS= read -r _; do
-        while read -t 2 -r _; do :; done
-        sync_uninstalled_app_configs
-      done
-      sleep 5
-    done
-  ) &
-  echo "$!" > "$PACKAGE_EVENT_COLLECTOR_PID_FILE"
-  chmod 644 "$PACKAGE_EVENT_COLLECTOR_PID_FILE"
 }
 
 start_config_event_collector() {

@@ -8,4 +8,5 @@ data class AppInfo(
     val isSystemApp: Boolean,
     val firstInstallTime: Long = 0L,
     val userId: Int = 0,
+    val uid: Int = -1,
 )

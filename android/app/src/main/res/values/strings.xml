@@ -112,7 +112,7 @@
     <string name="rule_config_error_android_prefix">Path cannot be under Android/data</string>
     <string name="rule_config_error_mapping_wildcard">Mapping paths do not support * or ? wildcards</string>
     <string name="rule_config_error_mapping_exclusion">Mapping paths do not support ! exclusion prefix</string>
-    <string name="rule_config_allowed_paths_rule_hint">Supported wildcard symbols: * ?\n* matches any number of characters.\n? matches one character.\n! is the exclusion prefix.\nOnly real path access supports these rules.</string>
+    <string name="rule_config_allowed_paths_rule_hint">* matches any characters; ? matches one. Prefix ! to exclude a folder.</string>
     <string name="rule_config_allowed_paths_rule_hint_desc">View rule help</string>
     <string name="rule_config_browse">Browse</string>
     <string name="rule_config_browser_load_failed">Failed to load directory</string>
@@ -291,7 +291,22 @@
     <string name="file_monitor_daemon_stale">Log service is not responding</string>
     <string name="file_monitor_enabled">File monitoring</string>
     <string name="file_monitor_disabled">Monitoring stopped</string>
-    <string name="file_monitor_start">Start monitoring</string>
-    <string name="file_monitor_stop">Stop monitoring</string>
     <string name="file_monitor_control_failed">Could not apply the monitor setting to the module</string>
+    <string name="rule_mapping_mode_only">Mappings only</string>
+    <string name="rule_mapping_mode_only_summary">Unmatched paths remain unchanged</string>
+    <string name="rule_sandboxed_paths">Sandboxed folders</string>
+    <string name="rule_read_only_paths">Read-only folders</string>
+    <plurals name="rule_path_count">
+        <item quantity="one">%1$d folder</item>
+        <item quantity="other">%1$d folders</item>
+    </plurals>
+    <string name="rule_paths_empty">No folders</string>
+    <string name="rule_path_label">Folder path</string>
+    <string name="rule_error_mapping_capture">The destination has more wildcards than the request</string>
+    <string name="rule_error_mapping_cycle">Mapping rules contain a cycle</string>
+    <string name="rule_error_mapping_depth">Too many mapping layers</string>
+    <string name="auto_redirect_new_apps">Automatically redirect new apps</string>
+    <string name="auto_redirect_template">New app template</string>
+    <string name="auto_redirect_default_rules">Default rules</string>
+    <string name="auto_redirect_template_missing">Template unavailable</string>
 </resources>

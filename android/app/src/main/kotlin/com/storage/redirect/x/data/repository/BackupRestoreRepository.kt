@@ -356,6 +356,8 @@ class BackupRestoreRepository {
         }
 
         templateRepo.restoreTemplatesFromBackup(backupJson)
+        if (!templateRepo.syncIfAutomaticEnabled())
+            return RestoreResult(isSuccess = false, restoredPackageCount = restoredPackageCount)
 
         Logger.info("Restore package configs succeeded: source=${source}, restored=${restoredPackageCount}")
         return RestoreResult(isSuccess = true, restoredPackageCount = restoredPackageCount)

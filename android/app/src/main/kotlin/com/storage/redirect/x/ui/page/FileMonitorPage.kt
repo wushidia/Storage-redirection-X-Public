@@ -126,14 +126,6 @@ fun FileMonitorPage(
                 backgroundColor = Color.Transparent,
                 onClick = monitorViewModel::refresh,
             )
-            ActionButton(
-                if (state.isMonitoringEnabled) MiuixIcons.Pause else MiuixIcons.Play,
-                stringResource(if (state.isMonitoringEnabled) R.string.file_monitor_stop else R.string.file_monitor_start),
-                modifier = Modifier.testTag("monitor_toggle"),
-                enabled = !state.isChangingMonitoring,
-                backgroundColor = Color.Transparent,
-                onClick = { monitorViewModel.setMonitoringEnabled(!state.isMonitoringEnabled) },
-            )
             OverlayIconDropdownMenu(
                 entry = filterEntry,
                 modifier = Modifier.padding(horizontal = 4.dp).testTag("monitor_filter_menu"),

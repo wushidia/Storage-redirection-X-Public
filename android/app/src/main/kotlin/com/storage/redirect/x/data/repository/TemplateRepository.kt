@@ -8,6 +8,12 @@ import com.storage.redirect.x.data.model.AppRedirectConfig
 import com.storage.redirect.x.data.model.RedirectConfig
 import com.storage.redirect.x.data.model.RedirectTemplate
 import kotlinx.collections.immutable.*
+import com.storage.redirect.x.data.service.RootService
+import com.storage.redirect.x.util.Paths
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val KEY_REDIRECT_TEMPLATES = "redirect_templates"
 
@@ -27,6 +33,20 @@ class TemplateRepository {
     fun loadTemplates(): ImmutableList<RedirectTemplate> {
         return RedirectTemplate.listFromJson(AppPreferences.getString(KEY_REDIRECT_TEMPLATES))
     }
+
+    suspend fun syncToModule(): Boolean = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val path = "${Paths.CONFIG_DIR}/templates.json"
+            val content = AppPreferences.getString(KEY_REDIRECT_TEMPLATES)
+                .ifBlank { "{\"version\":1,\"templates\":[]}" }
+            RootService.writeFile("$path.tmp", content) && RootService.runCommand(
+                "chmod 644 '$path.tmp' && mv -f '$path.tmp' '$path'"
+            ).isSuccess
+        }
+    }
+
+    suspend fun syncIfAutomaticEnabled(): Boolean =
+        !ConfigRepository().readAutoRedirectPolicy().isEnabled || syncToModule()
 
     fun saveTemplate(template: RedirectTemplate): ImmutableList<RedirectTemplate> {
         val normalized = template.normalized().copy(updatedAt = System.currentTimeMillis())
@@ -50,6 +70,9 @@ class TemplateRepository {
                 name = name,
                 allowedRealPaths = appConfig.allowedRealPaths.toImmutableList(),
                 pathMappings = appConfig.pathMappings.toImmutableList(),
+                isMappingModeOnly = appConfig.isMappingModeOnly,
+                sandboxedPaths = appConfig.sandboxedPaths.toImmutableList(),
+                readOnlyPaths = appConfig.readOnlyPaths.toImmutableList(),
             )
             .normalized()
     }
@@ -76,12 +99,18 @@ class TemplateRepository {
                             isEnabled = true,
                             allowedRealPaths = current.allowedRealPaths + template.allowedRealPaths,
                             pathMappings = current.pathMappings + template.pathMappings,
+                            isMappingModeOnly = template.isMappingModeOnly,
+                            sandboxedPaths = current.sandboxedPaths + template.sandboxedPaths,
+                            readOnlyPaths = current.readOnlyPaths + template.readOnlyPaths,
                         )
                     TemplateApplyMode.Replace ->
                         current.copy(
                             isEnabled = true,
                             allowedRealPaths = template.allowedRealPaths,
                             pathMappings = template.pathMappings,
+                            isMappingModeOnly = template.isMappingModeOnly,
+                            sandboxedPaths = template.sandboxedPaths,
+                            readOnlyPaths = template.readOnlyPaths,
                         )
                 }
             result = result.updateAppConfig(next)
@@ -122,4 +151,6 @@ class TemplateRepository {
         root.add("templates", array)
         AppPreferences.put(KEY_REDIRECT_TEMPLATES, gson.toJson(root))
     }
+
+    companion object { private val writeMutex = Mutex() }
 }

@@ -21,6 +21,7 @@ import com.storage.redirect.x.ui.page.pathbrowser.BrowserScaffold
 import com.storage.redirect.x.ui.page.pathbrowser.BrowserSearch
 import com.storage.redirect.x.ui.page.pathbrowser.PathBrowserDialogs
 import com.storage.redirect.x.ui.page.pathbrowser.PathBrowserState
+import com.storage.redirect.x.ui.page.pathbrowser.PathSelectionKind
 
 @Composable
 fun PathBrowserPage(
@@ -31,12 +32,13 @@ fun PathBrowserPage(
     multiSelect: Boolean = false,
     allowExclude: Boolean = false,
     isInitiallyExcluded: Boolean = false,
+    selectionKind: PathSelectionKind = PathSelectionKind.Mapping,
     onBack: () -> Unit,
     onPathSelect: (String) -> Unit,
     onPathsSelect: (List<String>) -> Unit = {},
 ) {
-    val state = remember(userId, packageName, multiSelect, allowExclude, isInitiallyExcluded) {
-        PathBrowserState(userId, packageName, multiSelect, allowExclude, isInitiallyExcluded)
+    val state = remember(userId, packageName, multiSelect, allowExclude, isInitiallyExcluded, selectionKind) {
+        PathBrowserState(userId, packageName, multiSelect, allowExclude, isInitiallyExcluded, selectionKind)
     }
     // 页面切换取消旧协程，状态代次同时拒绝尚未返回的旧请求。
     LaunchedEffect(state, state.currentPath, state.reloadKey) {
