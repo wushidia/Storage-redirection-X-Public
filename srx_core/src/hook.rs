@@ -24,6 +24,13 @@ pub fn install_fuse_fixer_hook() {
     fuse_fixer::install();
 }
 
+pub(crate) fn capture_fuse_caller(uid: i32) {
+    if context::get_fuse_caller_uid() != uid {
+        context::set_fuse_caller_pid(-1);
+    }
+    context::set_fuse_caller_uid(uid);
+}
+
 pub(crate) fn refresh_runtime_config_throttled() {
     if context::ReentryGuard::is_reentrant() {
         let did_reload = reload::poll_or_check_throttled().did_reload();

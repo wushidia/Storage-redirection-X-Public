@@ -3,6 +3,7 @@ package org.srx.packages;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.IBinder;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONArray;
@@ -67,9 +68,19 @@ public final class RootPackageApi {
         .invoke(packages, packageName, flags(), userId);
   }
 
+  private List<?> userInfos() throws ReflectiveOperationException {
+    Method method;
+    try {
+      method = userApi.getMethod("getUsers", boolean.class, boolean.class, boolean.class);
+    } catch (NoSuchMethodException legacySignature) {
+      // 部分 ROM 保留单参数接口；接口内部失败仍向上传递。
+      return (List<?>) userApi.getMethod("getUsers", boolean.class).invoke(users, true);
+    }
+    return (List<?>) method.invoke(users, true, true, true);
+  }
+
   public JSONArray users() throws ReflectiveOperationException, org.json.JSONException {
-    List<?> values = (List<?>) userApi.getMethod("getUsers", boolean.class, boolean.class,
-        boolean.class).invoke(users, true, true, true);
+    List<?> values = userInfos();
     JSONArray result = new JSONArray();
     for (Object value : values) {
       Class<?> type = value.getClass();

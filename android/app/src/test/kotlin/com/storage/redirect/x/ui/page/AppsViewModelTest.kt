@@ -160,6 +160,18 @@ class AppsViewModelTest {
             return listOf(UserInfo(0, "Owner"), UserInfo(10, "Work"))
         }
     }
+    class SingleFlagUserApi {
+        fun getUsers(dying: Boolean): List<UserInfo> {
+            assertTrue(dying)
+            return listOf(UserInfo(0, "Owner"), UserInfo(10, "Work"))
+        }
+    }
+    class FailingUserApi {
+        fun getUsers(partial: Boolean, dying: Boolean, preCreated: Boolean): List<UserInfo> {
+            assertTrue(partial && dying && preCreated)
+            throw SecurityException("user service denied")
+        }
+    }
     companion object {
         fun slice(userId: Int): PackageSlice = PackageSlice(listOf(0, userId).distinct().map {
             android.content.pm.PackageInfo().apply {
@@ -181,6 +193,30 @@ class AppsViewModelTest {
         }
         assertEquals(10, old.lastUser)
         assertEquals(10, modern.lastUser)
+    }
+
+    @Test
+    fun singleFlagUserApiKeepsAllRealUsers() {
+        val packages = PackageApi33()
+        val users = SingleFlagUserApi()
+        val api = org.srx.packages.RootPackageApi(packages, packages.javaClass, users, users.javaClass, 37)
+        assertEquals(listOf(0, 10), api.users().let { rows ->
+            (0 until rows.length()).map { rows.getJSONObject(it).getInt("id") }
+        })
+        assertEquals(1010001, api.installedPackages(10).single().applicationInfo?.uid)
+    }
+
+    @Test
+    fun userServiceFailureIsNotReplacedWithAnotherSignature() {
+        val packages = PackageApi33()
+        val users = FailingUserApi()
+        val api = org.srx.packages.RootPackageApi(packages, packages.javaClass, users, users.javaClass, 37)
+        try {
+            api.users()
+            fail("user service error was swallowed")
+        } catch (error: java.lang.reflect.InvocationTargetException) {
+            assertTrue(error.cause is SecurityException)
+        }
     }
 
     @Test

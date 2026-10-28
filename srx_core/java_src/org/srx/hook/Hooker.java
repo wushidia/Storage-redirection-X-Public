@@ -23,6 +23,7 @@ public class Hooker {
   private static boolean MONITOR_ENABLED;
   public static native void refreshProviderLibraries();
   public static native void refreshConfig();
+  public static native void captureFuseCaller(int uid);
 
   public Method backup;
   private Member target;

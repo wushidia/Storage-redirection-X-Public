@@ -270,7 +270,7 @@ impl RuntimeFlow {
 
         Logger::init(Some(&self.package_name));
         if writer_context.is_system_writer {
-            self.install_writer_config_watch();
+            self.install_writer_config_watch(args);
         }
 
         log::info!(
@@ -280,7 +280,7 @@ impl RuntimeFlow {
             self.should_monitor
         );
 
-        self.setup_monitor();
+        self.setup_monitor(args);
 
         if !self.should_redirect {
             self.log_specialize_exit("monitor_only", is_system_writer, perf_started_ms, &metrics);
@@ -297,7 +297,7 @@ impl RuntimeFlow {
     }
 
     // 系统代写进程降权后仍可热更新：监听命名空间内可见的配置目录
-    fn install_writer_config_watch(&self) {
+    fn install_writer_config_watch(&self, args: &abi::AppSpecializeArgs) {
         log::info!("writer: file log off, logcat only");
         let config = SettingsHub::instance();
         let shared_apps_dir = format!("{}/apps", module_paths::SHARED_CONFIG_DIR);
@@ -312,7 +312,7 @@ impl RuntimeFlow {
         if let Some(api) = self.api.as_ref()
             && inotify_fd >= 0
         {
-            if api.exempt_fd(inotify_fd) {
+            if api.exempt_app_fd(inotify_fd, args) {
                 log::info!("config watch fd exempt fd={}", inotify_fd);
             } else {
                 log::warn!("config watch fd exempt failed fd={}", inotify_fd);
@@ -321,7 +321,7 @@ impl RuntimeFlow {
         }
     }
 
-    fn setup_monitor(&mut self) {
+    fn setup_monitor(&mut self, args: &abi::AppSpecializeArgs) {
         if self.should_monitor && platform::android_api_level() < 30 {
             let trail = AuditTrail::instance();
             trail.set_enabled(true);
@@ -339,7 +339,7 @@ impl RuntimeFlow {
             if let Some(api) = self.api.as_ref()
                 && monitor_fd >= 0
             {
-                if api.exempt_fd(monitor_fd) {
+                if api.exempt_app_fd(monitor_fd, args) {
                     log::info!("monitor log fd exempt fd={}", monitor_fd);
                 } else {
                     log::warn!("monitor log fd exempt failed fd={}", monitor_fd);
@@ -490,7 +490,7 @@ impl RuntimeFlow {
         }
 
         let send_started_ms = monotonic_ms();
-        self.companion_fd = send_companion_request_payload(self.api.as_ref(), &payload);
+        self.companion_fd = send_companion_request_payload(self.api.as_ref(), args, &payload);
         self.is_mount_request_sent = self.companion_fd >= 0;
         metrics.send_ms = monotonic_ms().saturating_sub(send_started_ms);
         self.log_specialize_exit("mount_request", is_system_writer, perf_started_ms, metrics);

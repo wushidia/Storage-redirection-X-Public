@@ -179,10 +179,8 @@ public final class FileMonitorHooks extends Hooker {
       Hooker.refreshProviderLibraries();
       return callBackup(args);
     }
-    if (!enabled)
-      return callBackup(args);
     if (kind.startsWith("media_") || kind.startsWith("download_"))
-      return providerOperation(args);
+      return enabled ? providerOperation(args) : callBackup(args);
     Object result;
     try {
       result = callBackup(args);
@@ -191,8 +189,12 @@ public final class FileMonitorHooks extends Hooker {
       throw original;
     }
     try {
-      reportFuse(args, result instanceof Integer ? (Integer) result : statusField.getInt(result),
-          uidField == null ? -1 : uidField.getInt(result));
+      int status = result instanceof Integer ? (Integer) result : statusField.getInt(result);
+      int uid = originatingUid(kind, args, uidField == null ? -1 : uidField.getInt(result));
+      // MediaStore 通过 Provider 打开文件时，FUSE 请求 UID 是 Provider 自身。
+      if (status == 0)
+        Hooker.captureFuseCaller(uid);
+      reportFuse(args, status, uid);
     } catch (ReflectiveOperationException | RuntimeException error) {
       Log.w(TAG, "observe FUSE access result", error);
     }

@@ -24,6 +24,10 @@ struct FuseInHeader {
 
 // 借用 FUSE 协议头提取真实调用方 UID/PID
 pub unsafe extern "C" fn hooked_read(fd: c_int, buf: *mut c_void, count: usize) -> isize {
+    // 同一请求内可能先探测再创建文件，身份保留到下一次读取 FUSE 请求。
+    if fd == CACHED_FUSE_FD.load(Ordering::Relaxed) {
+        context::clear_fuse_caller_uid();
+    }
     let self_ptr = hooked_read as *mut c_void;
     let result = runtime::call_prev_lazy(
         self_ptr,
@@ -63,6 +67,7 @@ pub unsafe extern "C" fn hooked_read(fd: c_int, buf: *mut c_void, count: usize) 
         return result;
     }
 
+    context::clear_fuse_caller_uid();
     context::set_fuse_caller_uid(header.uid as i32);
     if header.pid > 0 && header.pid <= i32::MAX as u32 {
         context::set_fuse_caller_pid(header.pid as i32);

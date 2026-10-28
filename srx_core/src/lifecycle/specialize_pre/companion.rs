@@ -37,7 +37,11 @@ pub(super) fn build_companion_request_payload(
 }
 
 // pre 发送后保留 socket，post 读取挂载结果并关闭。
-pub(super) fn send_companion_request_payload(api: Option<&abi::Api>, payload: &str) -> libc::c_int {
+pub(super) fn send_companion_request_payload(
+    api: Option<&abi::Api>,
+    args: &abi::AppSpecializeArgs,
+    payload: &str,
+) -> libc::c_int {
     let Some(api) = api else {
         return -1;
     };
@@ -51,7 +55,7 @@ pub(super) fn send_companion_request_payload(api: Option<&abi::Api>, payload: &s
         return -1;
     }
 
-    if !api.exempt_fd(fd) {
+    if !api.exempt_app_fd(fd, args) {
         log::warn!("companion fd exemption failed fd={}", fd);
         unsafe { libc::close(fd) };
         return -1;

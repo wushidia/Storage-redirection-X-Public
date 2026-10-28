@@ -32,6 +32,10 @@ unsafe extern "C" fn refresh_config(_env: *mut JNIEnv, _class: jclass) {
     crate::hook::InterceptHub::instance().refresh_writer_mode();
 }
 
+unsafe extern "C" fn capture_fuse_caller(_env: *mut JNIEnv, _class: jclass, uid: jni_sys::jint) {
+    crate::hook::capture_fuse_caller(uid);
+}
+
 pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     if env.is_null() || hooker_class.is_null() {
         return false;
@@ -41,6 +45,11 @@ pub fn init(env: *mut JNIEnv, hooker_class: jclass) -> bool {
     }
 
     let methods = [
+        JNINativeMethod {
+            name: c"captureFuseCaller".as_ptr() as *mut _,
+            signature: c"(I)V".as_ptr() as *mut _,
+            fnPtr: capture_fuse_caller as *mut _,
+        },
         JNINativeMethod {
             name: c"refreshConfig".as_ptr() as *mut _,
             signature: c"()V".as_ptr() as *mut _,

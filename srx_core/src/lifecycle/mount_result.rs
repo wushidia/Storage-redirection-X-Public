@@ -13,28 +13,30 @@ pub(super) fn read_result(fd: i32, timeout: Duration) -> io::Result<bool> {
                 "mount result timeout",
             ));
         }
-        let timeout = libc::timeval {
-            tv_sec: remaining.as_secs() as libc::time_t,
-            tv_usec: remaining.subsec_micros().max(1) as libc::suseconds_t,
+        let mut event = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
         };
-        if unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_RCVTIMEO,
-                &timeout as *const _ as *const libc::c_void,
-                std::mem::size_of_val(&timeout) as libc::socklen_t,
-            )
-        } != 0
-        {
-            return Err(io::Error::last_os_error());
+        // specialize 后无权修改 zygote socket 的选项，按同一截止时间等待可读。
+        let wait_ms = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
+        let ready = unsafe { libc::poll(&mut event, 1, wait_ms) };
+        if ready == 0 {
+            continue;
+        }
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
         }
         let count = unsafe {
             libc::recv(
                 fd,
                 bytes[received..].as_mut_ptr().cast(),
                 bytes.len() - received,
-                0,
+                libc::MSG_DONTWAIT,
             )
         };
         if count == 0 {
@@ -45,7 +47,10 @@ pub(super) fn read_result(fd: i32, timeout: Duration) -> io::Result<bool> {
         }
         if count < 0 {
             let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
+            if matches!(
+                error.kind(),
+                io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+            ) {
                 continue;
             }
             return Err(error);

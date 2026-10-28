@@ -176,6 +176,11 @@ impl Api {
         }
     }
 
+    pub fn exempt_app_fd(&self, fd: c_int, args: &AppSpecializeArgs) -> bool {
+        // 独立 specialize 没有 FD 清理阶段，也没有 fds_to_ignore 参数。
+        args.fds_to_ignore.is_null() || self.exempt_fd(fd)
+    }
+
     // 批量替换 Java 类的 native 方法，Zygisk 把原实现写回每条 method 的 fnPtr
     #[allow(dead_code)]
     pub fn hook_jni_native_methods(
@@ -219,5 +224,33 @@ impl Api {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static EXEMPT_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn reject_exemption(_fd: c_int) -> bool {
+        EXEMPT_CALLS.fetch_add(1, Ordering::Relaxed);
+        false
+    }
+
+    #[test]
+    fn standalone_specialize_keeps_fds_without_a_fork_exemption() {
+        let mut table: ApiTable = unsafe { std::mem::zeroed() };
+        table.exempt_fd = Some(reject_exemption);
+        let api = Api::new(&mut table);
+        let mut args: AppSpecializeArgs = unsafe { std::mem::zeroed() };
+        assert!(api.exempt_app_fd(9, &args));
+        assert_eq!(EXEMPT_CALLS.load(Ordering::Relaxed), 0);
+
+        let fds_to_ignore = std::ptr::null_mut();
+        args.fds_to_ignore = &fds_to_ignore;
+        assert!(!api.exempt_app_fd(9, &args));
+        assert_eq!(EXEMPT_CALLS.load(Ordering::Relaxed), 1);
     }
 }

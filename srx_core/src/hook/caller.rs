@@ -101,7 +101,6 @@ pub fn update_caller_package_for_current_thread(hub: &InterceptHub) {
                                 count
                             );
                         }
-                        context::clear_fuse_caller_uid();
                         return;
                     }
                 }
@@ -117,7 +116,9 @@ pub fn update_caller_package_for_current_thread(hub: &InterceptHub) {
                 );
             }
         }
-        context::clear_fuse_caller_uid();
+        if fuse_age_ms > FUSE_CALLER_MAX_AGE_MS {
+            context::clear_fuse_caller_uid();
+        }
     }
 
     let mut package_name = String::new();
