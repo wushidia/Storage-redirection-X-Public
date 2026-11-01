@@ -10,6 +10,11 @@ public final class PackageQueryMain {
   private PackageQueryMain() {}
 
   public static void main(String[] args) throws Exception {
+    if ("sync-config-runtime".equals(args[0])) {
+      ConfigChanges.sync(new java.io.File(args[1]), new java.io.File(args[2]),
+          "baseline".equals(args[3]));
+      return;
+    }
     if ("remove-profile".equals(args[0])) {
       new ConfigProfileStore(new java.io.File(args[1]), new java.io.File("/dev/srx_config"))
           .removeProfile(args[2], Integer.parseInt(args[3]), new java.io.File(args[4]));

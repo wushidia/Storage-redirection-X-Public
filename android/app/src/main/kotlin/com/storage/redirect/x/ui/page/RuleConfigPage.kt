@@ -276,7 +276,14 @@ fun RuleConfigPage(
     }
 
     val appConfig = config.getAppConfig(packageName)
-    val allowedPaths = appConfig?.allowedRealPaths ?: emptyList()
+    val isBlacklistMode = appConfig?.isMappingModeOnly == true
+    val policyPaths = appConfig?.run { if (isMappingModeOnly) sandboxedPaths else allowedRealPaths }.orEmpty()
+    fun savePolicyPaths(paths: List<String>) {
+        val current = config.getAppConfig(packageName) ?: AppRedirectConfig(packageName)
+        val updated = if (current.isMappingModeOnly) current.copy(sandboxedPaths = paths)
+            else current.copy(allowedRealPaths = paths)
+        saveConfig(config.updateAppConfig(updated))
+    }
     val pathMappings = appConfig?.pathMappings ?: emptyList()
     val isRedirected = config.redirectApps.contains(packageName)
 
@@ -305,13 +312,10 @@ fun RuleConfigPage(
         detailContent = { detail ->
             if (detail is PolicyBrowseRoute) {
                 val current = appConfig ?: AppRedirectConfig(packageName, isEnabled = isRedirected)
-                RulePathsPage(kind = detail.kind,
-                    paths = if (detail.kind == PolicyPathKind.ReadOnly) current.readOnlyPaths else current.sandboxedPaths,
+                RulePathsPage(paths = current.readOnlyPaths,
                     userId = userId, browserRepository = pathBrowserRepo, onBack = { browseRoute = null },
                     onChange = { paths ->
-                        val updated = if (detail.kind == PolicyPathKind.ReadOnly) current.copy(readOnlyPaths = paths)
-                            else current.copy(sandboxedPaths = paths)
-                        saveConfig(config.updateAppConfig(updated))
+                        saveConfig(config.updateAppConfig(current.copy(readOnlyPaths = paths)))
                     })
             } else {
             val route = detail as PathBrowseRoute
@@ -365,11 +369,7 @@ fun RuleConfigPage(
                     pathDialogErrorResId = R.string.rule_config_browser_invalid_path
                     showPathDialog.value = true
                 } else {
-                    var nextConfig = config
-                    for (path in validPaths) {
-                        nextConfig = nextConfig.addAllowedRealPath(packageName, path)
-                    }
-                    saveConfig(nextConfig)
+                    savePolicyPaths(policyPaths + validPaths)
                     pathDialogErrorResId = null
                     showPathDialog.value = false
                     if (validPaths.size < paths.size) {
@@ -399,7 +399,7 @@ fun RuleConfigPage(
                         IconButton(
                             backgroundColor = Color.Transparent,
                             onClick = {
-                                if (allowedPaths.isEmpty() && pathMappings.isEmpty()) {
+                                if (policyPaths.isEmpty() && pathMappings.isEmpty()) {
                                     Toast.makeText(
                                             context,
                                             R.string.apps_template_save_failed_empty,
@@ -469,10 +469,9 @@ fun RuleConfigPage(
                     item {
                         Spacer(Modifier.height(RULE_CONFIG_SECTION_TOP_SPACING))
                         val current = appConfig ?: AppRedirectConfig(packageName, isEnabled = isRedirected)
-                        RuleOptionsCard(current.isMappingModeOnly, current.readOnlyPaths.size, current.sandboxedPaths.size,
+                        RuleOptionsCard(current.isMappingModeOnly, current.readOnlyPaths.size,
                             onModeChange = { saveConfig(config.updateAppConfig(current.copy(isMappingModeOnly = it))) },
-                            onReadOnly = { browseRoute = PolicyBrowseRoute(PolicyPathKind.ReadOnly) },
-                            onSandboxed = { browseRoute = PolicyBrowseRoute(PolicyPathKind.Sandboxed) })
+                            onReadOnly = { browseRoute = PolicyBrowseRoute })
                     }
 
                     // 共享 UID 提示
@@ -508,12 +507,11 @@ fun RuleConfigPage(
                         }
                     }
 
-                    // 允许访问路径
-                    if (appConfig?.isMappingModeOnly != true) {
+                    // 两种模式共用目录列表与编辑入口，只更新各自的规则字段。
                     item {
                         SectionHeader(
                             title =
-                                "${stringResource(R.string.rule_config_allowed_paths)} (${allowedPaths.size})",
+                                "${stringResource(if (isBlacklistMode) R.string.rule_sandboxed_paths else R.string.rule_config_allowed_paths)} (${policyPaths.size})",
                             onInfo = { showAllowedPathHint = !showAllowedPathHint },
                             onAdd = {
                                 pathDialogIndex = null
@@ -548,10 +546,10 @@ fun RuleConfigPage(
                         }
                     }
 
-                    if (allowedPaths.isEmpty()) {
+                    if (policyPaths.isEmpty()) {
                         item { EmptyPlaceholder(stringResource(R.string.rule_config_no_paths)) }
                     } else {
-                        itemsIndexed(allowedPaths) { index, path ->
+                        itemsIndexed(policyPaths) { index, path ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Row(
                                     modifier =
@@ -602,8 +600,6 @@ fun RuleConfigPage(
                     }
 
                     // 路径映射
-                    }
-
                     item {
                         SectionHeader(
                             title =
@@ -753,21 +749,11 @@ fun RuleConfigPage(
                             is PathValidationResult.Valid -> {
                                 pathDialogErrorResId = null
                                 scope.launch {
-                                    val newConfig =
-                                        if (isEditingPath) {
-                                            val targetIndex = pathDialogIndex ?: return@launch
-                                            config.updateAllowedRealPath(
-                                                packageName,
-                                                targetIndex,
-                                                validation.normalized,
-                                            )
-                                        } else {
-                                            config.addAllowedRealPath(
-                                                packageName,
-                                                validation.normalized,
-                                            )
-                                        }
-                                    saveConfig(newConfig)
+                                    val paths = policyPaths.toMutableList()
+                                    val index = pathDialogIndex
+                                    if (index == null) paths.add(validation.normalized)
+                                    else paths[index] = validation.normalized
+                                    savePolicyPaths(paths)
                                 }
                                 true
                             }
@@ -983,14 +969,14 @@ fun RuleConfigPage(
                 onConfirm = {
                     scope.launch {
                         val target = deleteTarget ?: return@launch
-                        val newConfig =
-                            when (target) {
-                                is DeleteTarget.Path ->
-                                    config.removeAllowedRealPath(packageName, target.index)
-                                is DeleteTarget.Mapping ->
-                                    config.removePathMapping(packageName, target.index)
+                        when (target) {
+                            is DeleteTarget.Path -> {
+                                val paths = policyPaths.toMutableList()
+                                paths.removeAt(target.index)
+                                savePolicyPaths(paths)
                             }
-                        saveConfig(newConfig)
+                            is DeleteTarget.Mapping -> saveConfig(config.removePathMapping(packageName, target.index))
+                        }
                     }
                     true
                 },
@@ -1066,7 +1052,7 @@ private enum class BrowseTarget {
 
 private sealed interface ConfigDetailRoute
 private data class PathBrowseRoute(val target: BrowseTarget) : ConfigDetailRoute
-private data class PolicyBrowseRoute(val kind: PolicyPathKind) : ConfigDetailRoute
+private data object PolicyBrowseRoute : ConfigDetailRoute
 
 // 弹窗按钮行
 @Composable

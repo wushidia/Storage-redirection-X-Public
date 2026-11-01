@@ -98,6 +98,13 @@ public final class RootPackageApi {
     return (String[]) packageApi.getMethod("getPackagesForUid", int.class).invoke(packages, uid);
   }
 
+  public void forceStop(String packageName, int userId) throws ReflectiveOperationException {
+    Object activity = service("activity", "android.app.IActivityManager");
+    Class.forName("android.app.IActivityManager")
+        .getMethod("forceStopPackage", String.class, int.class)
+        .invoke(activity, packageName, userId);
+  }
+
   public void writeUidIndex(java.io.File config, java.io.File mirror) throws Exception {
     java.util.ArrayList<String> entries = new java.util.ArrayList<>();
     JSONArray profiles = users();

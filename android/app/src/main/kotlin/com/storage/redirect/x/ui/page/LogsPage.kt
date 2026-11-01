@@ -85,6 +85,19 @@ fun LogsPage(onBack: () -> Unit) {
         },
         actions = {
             ActionButton(
+                MiuixIcons.Delete,
+                stringResource(R.string.logs_clear),
+                enabled = !loading && lines.isNotEmpty(),
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        if (repo.clear()) lines = persistentListOf()
+                        else Toast.makeText(context, R.string.logs_clear_failed, Toast.LENGTH_SHORT).show()
+                        loading = false
+                    }
+                },
+            )
+            ActionButton(
                 MiuixIcons.Refresh,
                 stringResource(R.string.apps_refresh),
                 enabled = !loading,

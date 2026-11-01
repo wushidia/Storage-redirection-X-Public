@@ -6,7 +6,6 @@ mod writer_context;
 
 use super::RuntimeFlow;
 use crate::config::{SettingsHub, watcher};
-use crate::hook;
 use crate::logging::Logger;
 use crate::monitor::AuditTrail;
 use crate::platform::module_paths;
@@ -28,7 +27,7 @@ static MONITOR_HOOK_PROCESS_COUNT: AtomicU64 = AtomicU64::new(0);
 
 impl RuntimeFlow {
     // 请求 Zygisk 在 postAppSpecialize 后卸载模块 .so
-    fn request_dlclose(&self) {
+    pub(super) fn request_dlclose(&self) {
         if self.should_keep_module_loaded {
             log::debug!(
                 "dlclose skipped pid={} pkg={}",
@@ -228,7 +227,11 @@ impl RuntimeFlow {
         if install_monitor_bridge {
             self.should_keep_module_loaded = true;
         }
-        if !self.should_redirect && !self.should_monitor && !install_monitor_bridge {
+        if !self.should_redirect
+            && !self.should_monitor
+            && !install_monitor_bridge
+            && !self.should_install_fuse_fixer
+        {
             if !self.should_keep_module_loaded {
                 // 模块即将 dlclose，post 阶段不再做任何事，避免在转译进程里触碰匿名段
                 self.should_skip_post_work = true;
@@ -259,13 +262,6 @@ impl RuntimeFlow {
                 install_monitor_bridge,
                 self.should_monitor && platform::android_api_level() >= 30,
             );
-        }
-
-        if self.should_redirect
-            && let Some(api) = self.api.as_ref()
-            && !writer_context.is_system_writer
-        {
-            hook::install_cursor_window_native_hook(api, self.env, &self.package_name);
         }
 
         Logger::init(Some(&self.package_name));

@@ -27,22 +27,8 @@ impl RuntimeFlow {
         }
 
         if !self.should_redirect && !self.should_monitor {
-            let anti_started_ms = monotonic_ms();
-            // 此分支只在模块常驻（如 fuse_fixer）时到达，搬迁自身消除 .so 路径泄露
-            let relocated = if self.should_keep_module_loaded {
-                anti_detect::relocate_self()
-            } else {
-                0
-            };
-            if relocated > 0 {
-                log::info!("self relocated segments n={}", relocated);
-            }
-            // 无需重定向或监控的应用仍需命名匿名可执行区域
-            let named_count = anti_detect::name_anonymous_executable_regions();
-            let anti_ms = monotonic_ms().saturating_sub(anti_started_ms);
-            if named_count > 0 {
-                log::info!("anon regions named n={}", named_count);
-            }
+            let anti_ms = relocate_retained_module(self);
+            self.request_dlclose();
             log_post_perf(self, "bypass", 0, 0, anti_ms, perf_started_ms);
             return;
         }
@@ -72,6 +58,8 @@ impl RuntimeFlow {
 
         let hook_started_ms = monotonic_ms();
         let is_redirect_via_hook = self.should_redirect && self.is_system_writer_hook_redirect;
+        let has_native_monitor = self.should_monitor && platform::android_api_level() < 30;
+        self.should_keep_module_loaded |= is_redirect_via_hook || has_native_monitor;
         install_plt_hook(
             &self.package_name,
             self.should_monitor,
@@ -79,22 +67,8 @@ impl RuntimeFlow {
         );
         let hook_ms = monotonic_ms().saturating_sub(hook_started_ms);
 
-        let anti_started_ms = monotonic_ms();
-        // Hook 安装后先把自身文件背书段搬进匿名内存（消除 .so 路径与孤儿映射指纹），
-        // 再命名所有匿名可执行区域，覆盖模块代码和 hook trampoline
-        let relocated = if self.should_keep_module_loaded {
-            anti_detect::relocate_self()
-        } else {
-            0
-        };
-        if relocated > 0 {
-            log::info!("self relocated segments n={}", relocated);
-        }
-        let named_count = anti_detect::name_anonymous_executable_regions();
-        let anti_ms = monotonic_ms().saturating_sub(anti_started_ms);
-        if named_count > 0 {
-            log::info!("anon regions named n={}", named_count);
-        }
+        self.request_dlclose();
+        let anti_ms = relocate_retained_module(self);
         log_post_perf(
             self,
             "done",
@@ -104,6 +78,18 @@ impl RuntimeFlow {
             perf_started_ms,
         );
     }
+}
+
+fn relocate_retained_module(flow: &RuntimeFlow) -> i64 {
+    if !flow.should_keep_module_loaded {
+        return 0;
+    }
+    let started_ms = monotonic_ms();
+    let relocated = anti_detect::relocate_self();
+    if relocated > 0 {
+        log::info!("self relocated segments n={}", relocated);
+    }
+    monotonic_ms().saturating_sub(started_ms)
 }
 
 fn read_mount_result(fd: c_int, sent: bool, applied: &mut bool) {

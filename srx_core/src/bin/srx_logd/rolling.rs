@@ -77,19 +77,20 @@ impl RollingLog {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.flush();
-        if fs::write(&self.path, []).is_err() {
-            return;
-        }
+        let _ = self.try_clear();
+    }
+
+    pub(crate) fn try_clear(&mut self) -> io::Result<()> {
+        self.writer.flush()?;
+        fs::write(&self.path, [])?;
         self.line_count = 0;
         self.pending_flush = 0;
-        if let Ok(file) = OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)
-        {
-            self.writer = BufWriter::new(file);
-        }
+            .open(&self.path)?;
+        self.writer = BufWriter::new(file);
+        Ok(())
     }
 }
 

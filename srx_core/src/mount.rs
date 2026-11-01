@@ -3,6 +3,7 @@ mod alias;
 mod apply;
 mod core;
 mod map;
+pub(crate) mod proc_view;
 mod rules;
 
 pub struct MountPlanner {

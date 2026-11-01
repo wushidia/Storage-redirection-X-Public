@@ -32,6 +32,10 @@ allow appdomain adb_data_file file getattr
 # 降权后读取继承的 companion socket，等待挂载完成再执行应用代码。
 allow appdomain zygote unix_stream_socket read
 
+# 匿名 tmpfs 挂载视图保留原始 proc 标签。
+allow proc tmpfs filesystem associate
+allow proc_mounts tmpfs filesystem associate
+
 allow appdomain shell_data_file dir search
 allow appdomain shell_data_file dir open
 allow appdomain shell_data_file dir read

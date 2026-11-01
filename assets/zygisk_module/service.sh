@@ -9,14 +9,8 @@ LOGS_DIR="$MODDIR/logs"
 SRX_RUNTIME_DIR="/dev/srx_runtime"
 RUNNING_LOG_FILE="$LOGS_DIR/running.log"
 FILE_MONITOR_LOG_FILE="$LOGS_DIR/file_monitor.log"
-MEDIA_STATE_LOG_FILE="$LOGS_DIR/media_provider_state.log"
-APP_STATUS_LOG_FILE="$LOGS_DIR/app_status.log"
 STATS_FILE="$MODDIR/stats"
 LOGD_PID_FILE="$SRX_RUNTIME_DIR/.logd.pid"
-MEDIA_STATE_COLLECTOR_PID_FILE="$SRX_RUNTIME_DIR/.media_state_collector.pid"
-APP_STATUS_SNAPSHOT_PID_FILE="$SRX_RUNTIME_DIR/.app_status_snapshot.pid"
-MEDIA_STATE_LAST_PID_FILE="$LOGS_DIR/.media_state_last_pid"
-MEDIA_STATE_DETAIL_TS_FILE="$LOGS_DIR/.media_state_detail_ts"
 CONFIG_EVENT_COLLECTOR_PID_FILE="$SRX_RUNTIME_DIR/.config_event_collector.pid"
 CONFIG_STATE_FILE="$LOGS_DIR/.config_apps_state"
 UID_MAP_LAST_REFRESH_FILE="$LOGS_DIR/.uid_map_last_refresh"
@@ -34,7 +28,7 @@ chmod 755 "$LOGS_DIR"
 chmod 700 "$SRX_RUNTIME_DIR" || exit 1
 
 SERVICE_DIR="$MODDIR/service.d"
-SERVICE_PARTS="common.sh logd.sh file_monitor.sh media_state.sh app_status.sh config_events.sh boot.sh"
+SERVICE_PARTS="common.sh logd.sh file_monitor.sh config_events.sh boot.sh"
 
 for service_name in $SERVICE_PARTS; do
   service_part="$SERVICE_DIR/$service_name"
@@ -45,6 +39,6 @@ for service_name in $SERVICE_PARTS; do
   . "$service_part"
 done
 
-start_log_daemon || exit 1
+start_log_daemon
 start_file_monitor_service
 boot_guard_wait &

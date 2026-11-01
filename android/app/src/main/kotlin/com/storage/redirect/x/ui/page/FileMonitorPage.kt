@@ -30,6 +30,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.*
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 fun FileMonitorPage(
@@ -38,6 +39,7 @@ fun FileMonitorPage(
 ) {
     val context = LocalContext.current
     val state by monitorViewModel.uiState.collectAsStateWithLifecycle()
+    var isClearDialogVisible by remember { mutableStateOf(false) }
     val names = remember { mutableStateMapOf<String, String>() }
     val icons = remember { mutableStateMapOf<String, Drawable?>() }
     LaunchedEffect(state.entries) {
@@ -120,6 +122,13 @@ fun FileMonitorPage(
         },
         actions = {
             ActionButton(
+                MiuixIcons.Delete,
+                stringResource(R.string.file_monitor_clear),
+                enabled = !state.isLoading && !state.isLoadingMore && state.entries.isNotEmpty(),
+                backgroundColor = Color.Transparent,
+                onClick = { isClearDialogVisible = true },
+            )
+            ActionButton(
                 MiuixIcons.Refresh,
                 stringResource(R.string.file_monitor_refresh),
                 enabled = !state.isLoading,
@@ -200,6 +209,42 @@ fun FileMonitorPage(
         if (state.hasMore && filtered.isNotEmpty())
             item(key = "monitor_load_more") { MonitorLoadMore(state, monitorViewModel::loadMore) }
 
+    }
+    MonitorClearConfirmationDialog(
+        isVisible = isClearDialogVisible,
+        onDismiss = { isClearDialogVisible = false },
+        onConfirm = {
+            isClearDialogVisible = false
+            monitorViewModel.clear()
+        },
+    )
+}
+
+@Composable
+private fun MonitorClearConfirmationDialog(
+    isVisible: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(
+        show = isVisible,
+        title = stringResource(R.string.file_monitor_clear),
+        summary = stringResource(R.string.file_monitor_clear_confirm),
+        onDismissRequest = onDismiss,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                text = stringResource(R.string.common_cancel),
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                text = stringResource(R.string.common_delete),
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

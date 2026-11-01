@@ -191,9 +191,15 @@ fun TemplatesPage(onBack: () -> Unit = {}) {
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Spacer(Modifier.height(TEMPLATE_MAPPING_SUBTITLE_TOP_SPACING))
+                                    val pathsLabel = stringResource(
+                                        if (template.isMappingModeOnly) R.string.rule_sandboxed_paths
+                                        else R.string.rule_config_allowed_paths
+                                    )
+                                    val pathsCount = if (template.isMappingModeOnly)
+                                        template.sandboxedPaths.size else template.allowedRealPaths.size
                                     Text(
                                         text =
-                                            "${stringResource(R.string.rule_config_allowed_paths)} ${template.allowedRealPaths.size} · ${stringResource(R.string.rule_config_path_mappings)} ${template.pathMappings.size}",
+                                            "$pathsLabel $pathsCount · ${stringResource(R.string.rule_config_path_mappings)} ${template.pathMappings.size}",
                                         style = MiuixTheme.textStyles.body2,
                                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                         maxLines = 1,
@@ -330,6 +336,13 @@ private fun TemplateEditorPage(
         onTemplateChange(currentTemplate)
     }
 
+    val policyPaths = if (currentTemplate.isMappingModeOnly) currentTemplate.sandboxedPaths else currentTemplate.allowedRealPaths
+    fun savePolicyPaths(paths: List<String>) {
+        val values = paths.toImmutableList()
+        updateTemplate(if (currentTemplate.isMappingModeOnly) currentTemplate.copy(sandboxedPaths = values)
+            else currentTemplate.copy(allowedRealPaths = values))
+    }
+
     var detail by remember { mutableStateOf<TemplateEditorDetail?>(null) }
     val browserRepository = remember { PathBrowserRepository() }
     val userId = android.os.Process.myUid() / 100000
@@ -344,12 +357,10 @@ private fun TemplateEditorPage(
     BackHandler(enabled = detail == null) { onBack() }
 
     DetailTransition(detail = detail, onBack = ::closeDetail, detailContent = { target ->
-        if (target == TemplateEditorDetail.ReadOnly || target == TemplateEditorDetail.Sandboxed) {
-            val kind = if (target == TemplateEditorDetail.ReadOnly) PolicyPathKind.ReadOnly else PolicyPathKind.Sandboxed
-            RulePathsPage(kind, if (kind == PolicyPathKind.ReadOnly) currentTemplate.readOnlyPaths else currentTemplate.sandboxedPaths,
+        if (target == TemplateEditorDetail.ReadOnly) {
+            RulePathsPage(currentTemplate.readOnlyPaths,
                 userId, browserRepository, onBack = { detail = null }, onChange = { values ->
-                    updateTemplate(if (kind == PolicyPathKind.ReadOnly) currentTemplate.copy(readOnlyPaths = values.toImmutableList())
-                        else currentTemplate.copy(sandboxedPaths = values.toImmutableList()))
+                    updateTemplate(currentTemplate.copy(readOnlyPaths = values.toImmutableList()))
                 })
         } else {
             PathBrowserPage(title = stringResource(R.string.rule_config_browser_title),
@@ -368,8 +379,8 @@ private fun TemplateEditorPage(
                     closeDetail()
                 },
                 onPathsSelect = { values ->
-                    val paths = (currentTemplate.allowedRealPaths + values).mapNotNull(RedirectConfig::normalizeAllowedPath).distinct()
-                    updateTemplate(currentTemplate.copy(allowedRealPaths = paths.toImmutableList()))
+                    val paths = (policyPaths + values).mapNotNull(RedirectConfig::normalizeAllowedPath).distinct()
+                    savePolicyPaths(paths)
                     detail = null
                 })
         }
@@ -410,17 +421,15 @@ private fun TemplateEditorPage(
         ) {
             item {
                 Spacer(Modifier.height(TEMPLATE_SECTION_TOP_SPACING))
-                RuleOptionsCard(currentTemplate.isMappingModeOnly, currentTemplate.readOnlyPaths.size, currentTemplate.sandboxedPaths.size,
+                RuleOptionsCard(currentTemplate.isMappingModeOnly, currentTemplate.readOnlyPaths.size,
                     onModeChange = { updateTemplate(currentTemplate.copy(isMappingModeOnly = it)) },
-                    onReadOnly = { detail = TemplateEditorDetail.ReadOnly },
-                    onSandboxed = { detail = TemplateEditorDetail.Sandboxed })
+                    onReadOnly = { detail = TemplateEditorDetail.ReadOnly })
                 Spacer(Modifier.height(TEMPLATE_SECTION_TOP_SPACING))
             }
-            if (!currentTemplate.isMappingModeOnly) {
             item {
                 TemplateSectionHeader(
                     title =
-                        "${stringResource(R.string.rule_config_allowed_paths)} (${currentTemplate.allowedRealPaths.size})",
+                        "${stringResource(if (currentTemplate.isMappingModeOnly) R.string.rule_sandboxed_paths else R.string.rule_config_allowed_paths)} (${policyPaths.size})",
                     onInfo = { showAllowedPathHint = !showAllowedPathHint },
                     onAdd = {
                         pathDialogIndex = null
@@ -453,10 +462,10 @@ private fun TemplateEditorPage(
                 }
             }
 
-            if (currentTemplate.allowedRealPaths.isEmpty()) {
+            if (policyPaths.isEmpty()) {
                 item { TemplateEmptyPlaceholder(stringResource(R.string.rule_config_no_paths)) }
             } else {
-                itemsIndexed(currentTemplate.allowedRealPaths) { index, path ->
+                itemsIndexed(policyPaths) { index, path ->
                     TemplateRuleRow(
                         text = path,
                         index = index,
@@ -472,8 +481,6 @@ private fun TemplateEditorPage(
                         },
                     )
                 }
-            }
-
             }
 
             item {
@@ -605,14 +612,14 @@ private fun TemplateEditorPage(
                         pathDialogErrorResId = resolveTemplatePathValidationErrorResId(validation)
                         return@TemplateDialogButtonRow false
                     }
-                    val paths = currentTemplate.allowedRealPaths.toMutableList()
+                    val paths = policyPaths.toMutableList()
                     val index = pathDialogIndex
                     if (index == null) {
                         paths.add(validation.normalized)
                     } else if (index in paths.indices) {
                         paths[index] = validation.normalized
                     }
-                    updateTemplate(currentTemplate.copy(allowedRealPaths = paths.toImmutableList()))
+                    savePolicyPaths(paths)
                     true
                 },
             )
@@ -736,12 +743,10 @@ private fun TemplateEditorPage(
                 val target = deleteTarget ?: return@TemplateDialogButtonRow true
                 when (target) {
                     is TemplateDeleteTarget.Path -> {
-                        val paths = currentTemplate.allowedRealPaths.toMutableList()
+                        val paths = policyPaths.toMutableList()
                         if (target.index in paths.indices) {
                             paths.removeAt(target.index)
-                            updateTemplate(
-                                currentTemplate.copy(allowedRealPaths = paths.toImmutableList())
-                            )
+                            savePolicyPaths(paths)
                         }
                     }
                     is TemplateDeleteTarget.Mapping -> {
@@ -976,4 +981,4 @@ private sealed class TemplateDeleteTarget {
     data class Mapping(val index: Int) : TemplateDeleteTarget()
 }
 
-private enum class TemplateEditorDetail { Allowed, Request, Target, ReadOnly, Sandboxed }
+private enum class TemplateEditorDetail { Allowed, Request, Target, ReadOnly }

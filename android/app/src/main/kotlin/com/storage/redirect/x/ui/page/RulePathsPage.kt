@@ -2,6 +2,8 @@ package com.storage.redirect.x.ui.page
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,53 +21,49 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
-
-internal enum class PolicyPathKind { ReadOnly, Sandboxed }
 
 @Composable
 internal fun RuleOptionsCard(
     isMappingModeOnly: Boolean,
     readOnlyCount: Int,
-    sandboxedCount: Int,
     onModeChange: (Boolean) -> Unit,
     onReadOnly: () -> Unit,
-    onSandboxed: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
-        SwitchPreference(title = stringResource(R.string.rule_mapping_mode_only),
-            summary = if (isMappingModeOnly) stringResource(R.string.rule_mapping_mode_only_summary) else null,
-            checked = isMappingModeOnly, onCheckedChange = onModeChange,
-            modifier = Modifier.testTag("rule_mapping_mode_only"))
-        ArrowPreference(title = stringResource(R.string.rule_sandboxed_paths),
-            summary = pluralStringResource(R.plurals.rule_path_count, sandboxedCount, sandboxedCount),
-            enabled = isMappingModeOnly, onClick = onSandboxed,
-            modifier = Modifier.testTag("rule_sandboxed_paths"))
         ArrowPreference(title = stringResource(R.string.rule_read_only_paths),
             summary = pluralStringResource(R.plurals.rule_path_count, readOnlyCount, readOnlyCount), onClick = onReadOnly,
             modifier = Modifier.testTag("rule_read_only_paths"))
+        ChoicePreference(
+            title = stringResource(R.string.rule_work_mode),
+            items = listOf(stringResource(R.string.rule_mode_blacklist), stringResource(R.string.rule_mode_whitelist)),
+            selectedIndex = if (isMappingModeOnly) 0 else 1,
+            onSelect = { index ->
+                val isBlacklistSelected = index == 0
+                if (isBlacklistSelected != isMappingModeOnly) onModeChange(isBlacklistSelected)
+            },
+            modifier = Modifier.testTag("rule_mapping_mode_only"),
+        )
+
     }
 }
 
 @Composable
 internal fun RulePathsPage(
-    kind: PolicyPathKind,
     paths: List<String>,
     userId: Int,
     browserRepository: PathBrowserRepository,
     onChange: (List<String>) -> Unit,
     onBack: () -> Unit,
 ) {
-    val title = stringResource(if (kind == PolicyPathKind.ReadOnly) R.string.rule_read_only_paths else R.string.rule_sandboxed_paths)
+    val title = stringResource(R.string.rule_read_only_paths)
     var isBrowsing by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
     var editIndex by remember { mutableStateOf<Int?>(null) }
     var input by remember { mutableStateOf("") }
     var hasError by remember { mutableStateOf(false) }
-    val normalize: (String) -> String? = if (kind == PolicyPathKind.Sandboxed)
-        RedirectConfig::normalizeAllowedPath else RedirectConfig::normalizePolicyPath
+    val normalize = RedirectConfig::normalizePolicyPath
 
     fun edit(index: Int?) {
         editIndex = index
@@ -78,7 +76,7 @@ internal fun RulePathsPage(
         onBack = { isBrowsing = false; showEditor = true },
         detailContent = {
             PathBrowserPage(title, browserRepository, userId, multiSelect = editIndex == null, allowExclude = true,
-                selectionKind = if (kind == PolicyPathKind.Sandboxed) PathSelectionKind.Allowed else PathSelectionKind.Policy,
+                selectionKind = PathSelectionKind.Policy,
                 isInitiallyExcluded = input.startsWith('!'),
                 onBack = { isBrowsing = false; showEditor = true },
                 onPathSelect = { input = it; isBrowsing = false; showEditor = true },
@@ -111,26 +109,31 @@ internal fun RulePathsPage(
         }
         WindowDialog(show = showEditor && !isBrowsing, title = title,
             onDismissRequest = { showEditor = false }) {
-            PathInputField(value = input, onValueChange = { input = it; hasError = false },
-                label = stringResource(R.string.rule_path_label), singleLine = true,
-                onBrowse = { showEditor = false; isBrowsing = true },
-                inputModifier = Modifier.testTag("policy_path_input"),
-                browseModifier = Modifier.testTag("policy_browse"))
-            if (hasError) Text(stringResource(R.string.rule_config_browser_invalid_path),
-                color = MiuixTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextButton(stringResource(R.string.common_cancel), onClick = { showEditor = false }, modifier = Modifier.weight(1f))
-                TextButton(stringResource(R.string.common_ok),
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                    onClick = {
-                        val path = normalize(input)
-                        if (path == null) { hasError = true; return@TextButton }
-                        val updated = paths.toMutableList()
-                        val index = editIndex
-                        if (index == null) updated.add(path) else updated[index] = path
-                        onChange(updated.distinct())
-                        showEditor = false
-                    }, modifier = Modifier.weight(1f).testTag("policy_confirm"))
+            Column(Modifier.heightIn(max = 500.dp)) {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    PathInputField(value = input, onValueChange = { input = it; hasError = false },
+                        label = stringResource(R.string.rule_path_label),
+                        onBrowse = { showEditor = false; isBrowsing = true },
+                        inputModifier = Modifier.testTag("policy_path_input"),
+                        browseModifier = Modifier.testTag("policy_browse"))
+                    if (hasError) Text(stringResource(R.string.rule_config_browser_invalid_path),
+                        color = MiuixTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    Spacer(Modifier.height(16.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(stringResource(R.string.common_cancel), onClick = { showEditor = false }, modifier = Modifier.weight(1f))
+                    TextButton(stringResource(R.string.common_ok),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        onClick = {
+                            val path = normalize(input)
+                            if (path == null) { hasError = true; return@TextButton }
+                            val updated = paths.toMutableList()
+                            val index = editIndex
+                            if (index == null) updated.add(path) else updated[index] = path
+                            onChange(updated.distinct())
+                            showEditor = false
+                        }, modifier = Modifier.weight(1f).testTag("policy_confirm"))
+                }
             }
         }
     }

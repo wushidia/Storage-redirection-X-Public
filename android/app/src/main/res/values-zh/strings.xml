@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
+    <string name="logs_clear">清空运行日志</string>
+    <string name="logs_clear_failed">清空运行日志失败</string>
+    <string name="file_monitor_clear">清空监视记录</string>
+    <string name="file_monitor_clear_confirm">确定要清空全部监视记录吗？此操作无法撤销。</string>
     <string name="app_name">存储重定向 X</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
@@ -84,7 +88,7 @@
     <string name="rule_config_enable_redirect">开启重定向</string>
     <string name="rule_config_redirect_enabled">已启用重定向</string>
     <string name="rule_config_redirect_disabled">未启用重定向</string>
-    <string name="rule_config_allowed_paths">允许访问路径</string>
+    <string name="rule_config_allowed_paths">白名单目录</string>
     <string name="rule_config_path_mappings">路径映射</string>
     <string name="rule_config_add_path">添加路径</string>
     <string name="rule_config_edit_path">编辑路径</string>
@@ -283,9 +287,10 @@
     <string name="file_monitor_enabled">文件监控</string>
     <string name="file_monitor_disabled">文件监控已关闭</string>
     <string name="file_monitor_control_failed">模块未能应用监控设置</string>
-    <string name="rule_mapping_mode_only">仅映射模式</string>
-    <string name="rule_mapping_mode_only_summary">未匹配的路径保持原样</string>
-    <string name="rule_sandboxed_paths">局部沙盒</string>
+    <string name="rule_work_mode">工作模式</string>
+    <string name="rule_mode_blacklist">黑名单</string>
+    <string name="rule_mode_whitelist">白名单</string>
+    <string name="rule_sandboxed_paths">黑名单目录</string>
     <string name="rule_read_only_paths">只读目录</string>
     <plurals name="rule_path_count">
         <item quantity="other">%1$d 个目录</item>

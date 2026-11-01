@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
+    <string name="logs_clear">Clear running logs</string>
+    <string name="logs_clear_failed">Failed to clear running logs</string>
+    <string name="file_monitor_clear">Clear monitor records</string>
+    <string name="file_monitor_clear_confirm">Clear all monitoring records? This cannot be undone.</string>
     <string name="app_name">Storage Redirect X</string>
     <string name="theme_system">Follow System</string>
     <string name="theme_light">Light</string>
@@ -85,7 +89,7 @@
     <string name="rule_config_enable_redirect">Enable Redirect</string>
     <string name="rule_config_redirect_enabled">Redirect enabled</string>
     <string name="rule_config_redirect_disabled">Redirect disabled</string>
-    <string name="rule_config_allowed_paths">Allowed Paths</string>
+    <string name="rule_config_allowed_paths">Whitelist folders</string>
     <string name="rule_config_path_mappings">Path Mappings</string>
     <string name="rule_config_add_path">Add Path</string>
     <string name="rule_config_edit_path">Edit Path</string>
@@ -292,9 +296,10 @@
     <string name="file_monitor_enabled">File monitoring</string>
     <string name="file_monitor_disabled">Monitoring stopped</string>
     <string name="file_monitor_control_failed">Could not apply the monitor setting to the module</string>
-    <string name="rule_mapping_mode_only">Mappings only</string>
-    <string name="rule_mapping_mode_only_summary">Unmatched paths remain unchanged</string>
-    <string name="rule_sandboxed_paths">Sandboxed folders</string>
+    <string name="rule_work_mode">Working mode</string>
+    <string name="rule_mode_blacklist">Blacklist</string>
+    <string name="rule_mode_whitelist">Whitelist</string>
+    <string name="rule_sandboxed_paths">Blacklist folders</string>
     <string name="rule_read_only_paths">Read-only folders</string>
     <plurals name="rule_path_count">
         <item quantity="one">%1$d folder</item>

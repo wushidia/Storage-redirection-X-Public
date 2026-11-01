@@ -19,7 +19,10 @@ class LogRepository {
 
     suspend fun clear(): Boolean {
         if (!RootService.isRootAvailable()) return false
-        return RootService.runCommand("echo \"\" > ${Paths.RUNNING_LOG}").isSuccess
+        return RootService.runCommand(
+            "for binary in ${Paths.MODULE_DIR}/bin/*/srx_logd; do " +
+                "[ -x \"\$binary\" ] || continue; \"\$binary\" clear-running && exit 0; done; exit 1"
+        ).isSuccess
     }
 
     // 检查日志文件是否发生变化（用于自动刷新）

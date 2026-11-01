@@ -6,6 +6,8 @@ plugins {
 val appVersionName = providers.gradleProperty("appVersionName").get()
 val appVersionCode = providers.gradleProperty("appVersionCode").get()
 val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+val targetAbis = providers.gradleProperty("targetAbi").orNull
+    ?.split(",")?.map(String::trim)?.filter(String::isNotEmpty)
 
 android {
     namespace = "com.storage.redirect.x"
@@ -19,7 +21,7 @@ android {
         versionName = appVersionName
         buildConfigField("boolean", "IS_DEBUG_BUILD", "false")
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += targetAbis?.takeIf { it.isNotEmpty() } ?: listOf("arm64-v8a", "x86_64")
         }
     }
 
@@ -44,6 +46,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        dex { useLegacyPackaging = true }
+        resources {
+            excludes += listOf("META-INF/*.kotlin_module", "META-INF/DEPENDENCIES")
+        }
     }
 
     signingConfigs {

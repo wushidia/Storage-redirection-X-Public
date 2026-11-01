@@ -1,7 +1,8 @@
-// std::string ABI 临时包装：从 libfuse_jni 自身的 dynsym 解析 assign / 析构符号
+// std::string ABI 临时包装：从 FUSE 镜像或已加载的 libc++ 成对解析符号
 // libc++ basic_string 全零的 24 字节是合法 SSO 空串，构造无需调用 ctor
 
 use super::image::FuseJniImage;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_void;
 
 const STD_ASSIGN_NDK: &[u8] =
@@ -45,12 +46,17 @@ pub struct StringAbi {
 
 impl StringAbi {
     pub fn resolve(image: &FuseJniImage) -> Option<Self> {
-        let assign_addr = image
-            .find_symbol(STD_ASSIGN_NDK)
-            .or_else(|| image.find_symbol(STD_ASSIGN_STD))?;
-        let dtor_addr = image
-            .find_symbol(STD_DTOR_NDK)
-            .or_else(|| image.find_symbol(STD_DTOR_STD))?;
+        let (assign_addr, dtor_addr) = [
+            (STD_ASSIGN_NDK, STD_DTOR_NDK),
+            (STD_ASSIGN_STD, STD_DTOR_STD),
+        ]
+        .into_iter()
+        .find_map(|(assign, dtor)| {
+            image
+                .find_symbol(assign)
+                .zip(image.find_symbol(dtor))
+                .or_else(|| resolve_from_libcxx(assign, dtor))
+        })?;
         let assign: AssignFn = unsafe { std::mem::transmute::<usize, AssignFn>(assign_addr) };
         let dtor: DtorFn = unsafe { std::mem::transmute::<usize, DtorFn>(dtor_addr) };
         let layout = detect_layout(assign, dtor)?;
@@ -86,20 +92,48 @@ impl StringAbi {
     }
 }
 
-// 用一短一长两个探针 assign 后比对 storage 字节，反推 SSO/long 的存放方式
+fn resolve_from_libcxx(assign: &[u8], dtor: &[u8]) -> Option<(usize, usize)> {
+    let assign = CString::new(assign).ok()?;
+    let dtor = CString::new(dtor).ok()?;
+    let handle = unsafe { libc::dlopen(c"libc++.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD) };
+    if !handle.is_null() {
+        let result = resolve_pair(handle, &assign, &dtor);
+        unsafe { libc::dlclose(handle) };
+        if result.is_some() {
+            return result;
+        }
+    }
+    let handle = unsafe { srx_inline_hook::sh_dlopen(c"libc++.so") };
+    if handle.is_null() {
+        return None;
+    }
+    let assign = unsafe { srx_inline_hook::sh_dlsym(handle, &assign) };
+    let dtor = unsafe { srx_inline_hook::sh_dlsym(handle, &dtor) };
+    unsafe { srx_inline_hook::sh_dlclose(handle) };
+    (!assign.is_null() && !dtor.is_null()).then_some((assign as usize, dtor as usize))
+}
+
+fn resolve_pair(handle: *mut c_void, assign: &CStr, dtor: &CStr) -> Option<(usize, usize)> {
+    let assign = unsafe { libc::dlsym(handle, assign.as_ptr()) };
+    let dtor = unsafe { libc::dlsym(handle, dtor.as_ptr()) };
+    (!assign.is_null() && !dtor.is_null()).then_some((assign as usize, dtor as usize))
+}
+
+// 短串探针同时验证长度编码与字符位置，未识别布局不安装 Hook。
 // 仅在 install 阶段调用一次，构造短串不会触发 heap 分配
 fn detect_layout(assign: AssignFn, dtor: DtorFn) -> Option<Layout> {
     let mut short = CxxString { storage: [0; 3] };
     unsafe { assign(&mut short as *mut _ as *mut c_void, b"Z".as_ptr(), 1) };
     let bytes = short.storage.as_ptr() as *const u8;
     let first = unsafe { *bytes };
+    let second = unsafe { *bytes.add(1) };
     let last = unsafe { *bytes.add(23) };
     unsafe { dtor(&mut short as *mut _ as *mut c_void) };
 
     if first == b'Z' && last == 1 {
         return Some(Layout::Classic);
     }
-    if first == 2 && unsafe { *bytes.add(1) } == b'Z' {
+    if first == 2 && second == b'Z' {
         return Some(Layout::Alternate);
     }
     None

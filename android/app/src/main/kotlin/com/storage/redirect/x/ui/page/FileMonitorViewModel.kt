@@ -107,6 +107,19 @@ class FileMonitorViewModel(
         }
     }
 
+    fun clear() {
+        if (_uiState.value.isLoading || _uiState.value.isLoadingMore) return
+        refreshJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, hasControlError = false) }
+            if (monitorRepo.clear()) {
+                before = 0L
+                _uiState.update { it.copy(entries = persistentListOf(), hasMore = false, isLoading = false) }
+            } else {
+                _uiState.update { it.copy(isLoading = false, hasControlError = true) }
+            }
+        }
+    }
+
     fun updateSearchQuery(value: String) {
         _uiState.update { it.copy(searchQuery = value) }
     }

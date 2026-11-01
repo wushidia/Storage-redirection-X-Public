@@ -1,117 +1,4 @@
-use std::ffi::CString;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-const PR_SET_VMA: libc::c_int = 0x53564d41;
-const PR_SET_VMA_ANON_NAME: libc::c_ulong = 0;
-const ANON_REGION_LOG_STEP: u64 = 128;
-// 命名 guest 代码缓存会破坏转译器内部管理并触发信号异常
-const TRANSLATOR_MARKERS: &[&str] = &[
-    "libndk_translation.so", // berberis (AOSP / Google)
-    "libberberis",           // berberis 相关库前缀
-    "libhoudini",            // Intel Houdini
-    "houdini",               // /system/lib/arm[64]/nb/houdini 等路径
-    "libnb.so",              // Intel native bridge
-];
-static ANON_REGION_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
-
-#[inline]
-fn should_log_step(count: u64, step: u64) -> bool {
-    count == 1 || count.is_multiple_of(step)
-}
-
-pub fn name_anonymous_executable_regions() -> usize {
-    let mut count = 0;
-    let file = match File::open("/proc/self/maps") {
-        Ok(f) => f,
-        Err(_) => return 0,
-    };
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
-
-    // 命中转译器标志则整体跳过，避免误伤 guest 代码缓存
-    if lines
-        .iter()
-        .any(|l| TRANSLATOR_MARKERS.iter().any(|m| l.contains(m)))
-    {
-        log::info!("translator detected, skip anon rename");
-        return 0;
-    }
-
-    for line in lines {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 5 {
-            continue;
-        }
-
-        let range = parts[0];
-        let perms = parts[1];
-        let dev = parts[3];
-        if perms != "r-xp" || dev != "00:00" {
-            continue;
-        }
-
-        if parts.len() > 5 && !parts[5].is_empty() {
-            continue;
-        }
-
-        let mut range_parts = range.split('-');
-        let start_str = match range_parts.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let end_str = match range_parts.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let start = match usize::from_str_radix(start_str, 16) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let end = match usize::from_str_radix(end_str, 16) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let len = end.saturating_sub(start);
-        if len == 0 {
-            continue;
-        }
-
-        if set_vma_name(start, len, "dalvik-jit-code-cache").is_ok() {
-            let log_count = ANON_REGION_LOG_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-            if should_log_step(log_count, ANON_REGION_LOG_STEP) {
-                log::info!(
-                    "anon region named range=0x{:x}-0x{:x} kb={} name=dalvik-jit-code-cache n={}",
-                    start,
-                    end,
-                    len / 1024,
-                    log_count
-                );
-            }
-            count += 1;
-        }
-    }
-
-    count
-}
-
-fn set_vma_name(addr: usize, len: usize, name: &str) -> Result<(), ()> {
-    let c_name = CString::new(name).map_err(|_| ())?;
-    let result = unsafe {
-        libc::prctl(
-            PR_SET_VMA,
-            PR_SET_VMA_ANON_NAME,
-            addr as libc::c_ulong,
-            len as libc::c_ulong,
-            c_name.as_ptr() as libc::c_ulong,
-        )
-    };
-    if result != 0 {
-        return Err(());
-    }
-    Ok(())
-}
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // mremap flags（部分 target 的 libc 未导出常量，这里固定取内核值）
 const MREMAP_MAYMOVE: libc::c_int = 1;
@@ -125,13 +12,11 @@ struct Seg {
     offset: usize,
     prot: libc::c_int,
     readable: bool,
-    exec: bool,
 }
 struct SegCopy {
     src: *mut libc::c_void,
     dst: usize,
     len: usize,
-    exec: bool,
 }
 
 // 只迁移常驻模块自身的文件映射，保持虚拟地址不变。
@@ -183,11 +68,6 @@ pub fn relocate_self() -> usize {
             unsafe { libc::munmap(c.src, c.len) };
             continue;
         }
-        // dst 现在是匿名映射：给可执行段命名以混入 ART JIT 代码缓存
-        // 此处只命中我们自己的段，不会动到转译器（houdini/berberis）区域
-        if c.exec {
-            let _ = set_vma_name(c.dst, c.len, "dalvik-jit-code-cache");
-        }
         done += 1;
     }
 
@@ -227,14 +107,13 @@ fn collect_self_segments() -> Vec<Seg> {
             if len == 0 {
                 continue;
             }
-            let (prot, readable, exec) = perms_to_prot(perms);
+            let (prot, readable) = perms_to_prot(perms);
             segs.push(Seg {
                 start,
                 len,
                 offset,
                 prot,
                 readable,
-                exec,
             });
         }
     }
@@ -300,7 +179,6 @@ fn stage_segment_copy(seg: &Seg) -> Option<SegCopy> {
         src,
         dst: seg.start,
         len: seg.len,
-        exec: seg.exec,
     })
 }
 
@@ -319,7 +197,7 @@ fn parse_maps_line(line: &str) -> Option<(usize, usize, &str, usize, Option<&str
     Some((start, end, perms, offset, path))
 }
 
-fn perms_to_prot(perms: &str) -> (libc::c_int, bool, bool) {
+fn perms_to_prot(perms: &str) -> (libc::c_int, bool) {
     let b = perms.as_bytes();
     let r = b.first() == Some(&b'r');
     let w = b.get(1) == Some(&b'w');
@@ -329,7 +207,6 @@ fn perms_to_prot(perms: &str) -> (libc::c_int, bool, bool) {
             | (if w { libc::PROT_WRITE } else { 0 })
             | (if x { libc::PROT_EXEC } else { 0 }),
         r,
-        x,
     )
 }
 
@@ -361,7 +238,6 @@ mod tests {
             offset: 0,
             prot: libc::PROT_READ | libc::PROT_WRITE,
             readable: true,
-            exec: false,
         };
         let copied = stage_segment_copy(&segment).expect("owned mapping staging");
         unsafe {
@@ -393,7 +269,6 @@ mod tests {
             offset: 1,
             prot: libc::PROT_NONE,
             readable: false,
-            exec: false,
         };
         let copied = stage_segment_copy(&segment).expect("owned inaccessible mapping staging");
         let maps = std::fs::read_to_string("/proc/self/maps").expect("process maps");

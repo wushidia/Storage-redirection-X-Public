@@ -2,8 +2,6 @@
 
 SRX_RUNTIME_DIR="/dev/srx_runtime"
 LOGD_PID_FILE="$SRX_RUNTIME_DIR/.logd.pid"
-MEDIA_STATE_COLLECTOR_PID_FILE="$SRX_RUNTIME_DIR/.media_state_collector.pid"
-APP_STATUS_SNAPSHOT_PID_FILE="$SRX_RUNTIME_DIR/.app_status_snapshot.pid"
 CONFIG_EVENT_COLLECTOR_PID_FILE="$SRX_RUNTIME_DIR/.config_event_collector.pid"
 
 stop_background_process() {
@@ -41,8 +39,6 @@ if [ -r /dev/srx_file_monitor.pid ]; then
 fi
 rm -f /dev/srx_file_monitor_health.json
 stop_collector_by_pid_file "$LOGD_PID_FILE"
-stop_collector_by_pid_file "$MEDIA_STATE_COLLECTOR_PID_FILE"
-stop_collector_by_pid_file "$APP_STATUS_SNAPSHOT_PID_FILE"
 stop_collector_by_pid_file "$CONFIG_EVENT_COLLECTOR_PID_FILE"
 
 # 清理统计/临时文件

@@ -159,6 +159,11 @@ handle_config_changes() {
   fi
 }
 
+sync_config_runtime() {
+  CLASSPATH="$MODDIR/monitor.dex" /system/bin/app_process /system/bin \
+    org.srx.packages.PackageQueryMain sync-config-runtime "$CONFIG_DIR" "$SRX_RUNTIME_DIR" "$1"
+}
+
 start_config_event_collector() {
   (
     tmp_old_state="$LOGS_DIR/.config_apps_state.old"
@@ -167,6 +172,10 @@ start_config_event_collector() {
     build_config_state_file "$CONFIG_STATE_FILE"
     mkdir -p "$APPS_CONFIG_DIR"
     sync_shared_config_dir
+    sync_config_runtime baseline || {
+      log -p e -t Boot "config runtime baseline failed"
+      exit 1
+    }
 
     # inotifyd 监听配置目录，事件通过管道传给处理循环。
     # w=写入关闭 c=内容修改 m=新建 d=删除 n=移入
@@ -183,14 +192,14 @@ start_config_event_collector() {
         while read -t 1 -r _; do :; done
 
         sync_shared_config_dir
-        sync_monitor_collector
-        sync_debug_collectors
 
         case "$event_line" in
           *"global.json")
             continue
             ;;
         esac
+
+        sync_config_runtime apply || log -p e -t Boot "config runtime apply failed"
 
         if [ -f "$CONFIG_STATE_FILE" ]; then
           cp "$CONFIG_STATE_FILE" "$tmp_old_state"

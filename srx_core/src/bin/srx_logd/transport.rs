@@ -116,6 +116,49 @@ impl ClientSocket {
         }
         Ok(())
     }
+
+    pub(crate) fn request(&self, command: &str) -> io::Result<()> {
+        // Linux 的 Unix socket 自动绑定为每次控制请求分配独立的抽象地址。
+        let mut local: sockaddr_un = unsafe { mem::zeroed() };
+        local.sun_family = AF_UNIX as _;
+        if unsafe {
+            bind(
+                self.fd,
+                &local as *const _ as *const sockaddr,
+                sockaddr_un_len(0),
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        self.send('I', "ControlRequest", command)?;
+        let mut input = libc::pollfd {
+            fd: self.fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut input, 1, 5000) };
+        if ready < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if ready == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "log control response timeout",
+            ));
+        }
+        let mut response = [0u8; 512];
+        let size = unsafe { libc::recv(self.fd, response.as_mut_ptr().cast(), response.len(), 0) };
+        if size < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if &response[..size as usize] != b"ok" {
+            return Err(io::Error::other(
+                String::from_utf8_lossy(&response[..size as usize]).into_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ClientSocket {

@@ -1,6 +1,6 @@
 use super::MountPlanner;
 use crate::domain::PathMapping;
-use crate::platform::{fs, module_paths, paths};
+use crate::platform::{fs, paths};
 use std::fs as std_fs;
 
 const ALLOW_WILDCARD_EXPAND_LIMIT: usize = 512;
@@ -51,31 +51,28 @@ impl MountPlanner {
             android_path
         );
 
-        let real_storage_anchor_root = format!("{}/tmp/real_storage", module_paths::MODULE_DIR);
-        let real_storage_anchor = format!("{}/{}", real_storage_anchor_root, self.user_id);
-        let mut is_real_storage_anchor_ready = false;
-        if self.ensure_directory_exists(&real_storage_anchor_root, false)
-            && self.ensure_directory_exists(&real_storage_anchor, false)
-        {
+        let mut anchor = StorageAnchor::new(self.user_id);
+        if self.ensure_directory_exists(&anchor.path, false) {
+            anchor.has_directory = true;
             for source_candidate in self.expand_storage_alias_paths(&storage_path) {
                 if !fs::is_directory(&source_candidate) {
                     continue;
                 }
-                if self.bind_mount(&source_candidate, &real_storage_anchor, true) {
-                    is_real_storage_anchor_ready = true;
+                if self.bind_mount(&source_candidate, &anchor.path, true) {
+                    anchor.is_mounted = true;
                     log::info!(
                         "real storage anchored {} -> {}",
                         source_candidate,
-                        real_storage_anchor
+                        anchor.path
                     );
                     break;
                 }
             }
         }
-        if !is_real_storage_anchor_ready {
+        if !anchor.is_mounted {
             log::warn!(
                 "real storage anchor failed, fallback to data/media: {}",
-                real_storage_anchor
+                anchor.path.as_str()
             );
         }
 
@@ -142,10 +139,10 @@ impl MountPlanner {
         }
 
         if !allowed_real_paths.is_empty() {
-            let real_base_path = if is_real_storage_anchor_ready {
-                real_storage_anchor
+            let real_base_path = if anchor.is_mounted {
+                anchor.path.as_str()
             } else {
-                data_media_root.clone()
+                data_media_root.as_str()
             };
 
             let mut resolved_paths: Vec<String> = Vec::with_capacity(allowed_real_paths.len());
@@ -179,7 +176,7 @@ impl MountPlanner {
                     let expanded = Self::expand_allowed_real_path_wildcard(
                         &rule,
                         &storage_path,
-                        &real_base_path,
+                        real_base_path,
                     );
                     if expanded.is_empty() {
                         log::warn!("allow wildcard no match: {}", rule);
@@ -208,7 +205,7 @@ impl MountPlanner {
                 }
 
                 let real_source = format!("{}/{}", real_base_path, relative);
-                if is_real_storage_anchor_ready {
+                if anchor.is_mounted {
                     if !fs::is_directory(&real_source) {
                         log::warn!("real path missing, skip: {}", real_source);
                         continue;
@@ -429,4 +426,45 @@ fn reduce_allowed_real_path_rules(rules: Vec<String>) -> Vec<String> {
 
 fn has_allowed_path_wildcard(path: &str) -> bool {
     path.contains('*') || path.contains('?')
+}
+
+// 锚点只在规则恢复期间存在；独立进程路径避免并发应用共用同一目录。
+struct StorageAnchor {
+    path: String,
+    has_directory: bool,
+    is_mounted: bool,
+}
+
+impl StorageAnchor {
+    fn new(user_id: i32) -> Self {
+        Self {
+            path: format!("/storage/.srx_anchor_{}_{}", user_id, unsafe {
+                libc::getpid()
+            }),
+            has_directory: false,
+            is_mounted: false,
+        }
+    }
+}
+
+impl Drop for StorageAnchor {
+    fn drop(&mut self) {
+        if !self.has_directory {
+            return;
+        }
+        let Ok(path) = std::ffi::CString::new(self.path.as_str()) else {
+            return;
+        };
+        if self.is_mounted && unsafe { libc::umount2(path.as_ptr(), libc::MNT_DETACH) } != 0 {
+            log::warn!(
+                "anchor detach failed path={} error={}",
+                self.path,
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
+        if let Err(error) = std_fs::remove_dir(&self.path) {
+            log::warn!("anchor remove failed path={} error={}", self.path, error);
+        }
+    }
 }

@@ -379,7 +379,32 @@ fn handle_child_process(request: &CompanionMountRequest, sock: c_int) -> bool {
         false,
     );
 
+    let proc_views = if crate::redirect::policy::is_system_writer_package(&request.package_name) {
+        None
+    } else {
+        match crate::mount::proc_view::ProcMountViews::capture(request.pid) {
+            Ok(views) => Some(views),
+            Err(error) => {
+                log::warn!(
+                    "proc mount snapshot unavailable pid={} error={}",
+                    request.pid,
+                    error
+                );
+                None
+            }
+        }
+    };
     let is_success = mount_mgr.apply_rules(request);
+    if is_success && let Some(views) = proc_views {
+        match views.install() {
+            Ok(()) => log::info!("proc mount views installed pid={}", request.pid),
+            Err(error) => log::warn!(
+                "proc mount views failed pid={} error={}",
+                request.pid,
+                error
+            ),
+        }
+    }
 
     let result = if is_success { 0 } else { -1 };
     if !is_success {

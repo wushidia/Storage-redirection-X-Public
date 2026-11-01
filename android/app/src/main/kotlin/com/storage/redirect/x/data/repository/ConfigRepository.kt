@@ -136,7 +136,7 @@ class ConfigRepository {
                     userId.toString(), backupDir)
                 if (!result.isSuccess) return@withContext false
             }
-            true
+            notifyRulesReload(userId)
         }
 
     suspend fun readFileMonitorEnabled(): Boolean = readGlobalConfig().isFileMonitorEnabled.also {
@@ -277,9 +277,15 @@ class ConfigRepository {
         "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control monitor-policy && exit 0; done; exit 1"
     ).isSuccess
 
-    private suspend fun notifyRulesReload(userId: Int): Boolean = RootService.runCommand(
-        "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control rules:$userId && exit 0; done; exit 1"
-    ).isSuccess
+    private suspend fun notifyRulesReload(userId: Int): Boolean {
+        val isReloaded = RootService.runCommand(
+            "for b in ${Paths.MODULE_DIR}/bin/*/srx_logd; do [ -x \"\$b\" ] || continue; \"\$b\" control rules:$userId && exit 0; done; exit 1"
+        ).isSuccess
+        if (!isReloaded) return false
+        return RootService.packageCommand(
+            "sync-config-runtime", Paths.CONFIG_DIR, "/dev/srx_runtime", "apply"
+        ).isSuccess
+    }
 
     // 确保配置目录存在
     private suspend fun ensureConfigDir(): Boolean {

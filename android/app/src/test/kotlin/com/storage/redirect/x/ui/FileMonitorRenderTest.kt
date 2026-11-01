@@ -28,21 +28,20 @@ import org.robolectric.annotation.*
 @LooperMode(LooperMode.Mode.PAUSED)
 class FileMonitorRenderTest {
     @Test
-    fun advancedRuleControlsStayAlignedAndSwitchModes() {
+    fun advancedRuleControlsKeepReadOnlyAboveMode() {
         var isMappingOnly by androidx.compose.runtime.mutableStateOf(false)
         RenderScene {
             AppTheme(AppThemeSettings(colorMode = ColorMode.LIGHT)) {
-                com.storage.redirect.x.ui.page.RuleOptionsCard(isMappingOnly, 2, 1,
-                    onModeChange = { isMappingOnly = it }, onReadOnly = {}, onSandboxed = {})
+                com.storage.redirect.x.ui.page.RuleOptionsCard(isMappingOnly, 2,
+                    onModeChange = { isMappingOnly = it }, onReadOnly = {})
             }
         }.use { scene ->
             scene.frames()
             val readOnly = scene.tag("rule_read_only_paths").boundsInRoot
-            val sandbox = scene.tag("rule_sandboxed_paths").boundsInRoot
-            assertEquals(readOnly.left, sandbox.left, 1f)
-            assertEquals(readOnly.right, sandbox.right, 1f)
-            scene.tapTag("rule_mapping_mode_only")
-            assertTrue(isMappingOnly)
+            val mode = scene.tag("rule_mapping_mode_only").boundsInRoot
+            assertEquals(readOnly.left, mode.left, 1f)
+            assertEquals(readOnly.right, mode.right, 1f)
+            assertTrue(readOnly.bottom <= mode.top)
             scene.capture("advanced-rule-options")
         }
     }

@@ -8,6 +8,7 @@ SYSTEM_WRITER_UIDS_FILE="$CONFIG_DIR/system_writer_uids.list"
 STATS_FILE="$MODDIR/stats"
 BOOT_PENDING_FILE="$MODDIR/.boot_pending"
 BOOT_OK_FILE="$MODDIR/.boot_ok"
+BOOT_FAIL_COUNT_FILE="$MODDIR/.boot_fail_count"
 LOGS_CTX="u:object_r:shell_data_file:s0"
 
 mkdir -p "$LOGS_DIR"
@@ -35,8 +36,14 @@ if [ -f "$BOOT_OK_FILE" ]; then
 fi
 
 if [ -n "$last_pending" ] && [ "$last_pending" != "$boot_id" ] && [ "$last_pending" != "$last_ok" ]; then
-  touch "$MODDIR/disable"
-  exit 0
+  fail_count=$(cat "$BOOT_FAIL_COUNT_FILE" 2>/dev/null)
+  case "$fail_count" in ''|*[!0-9]*) fail_count=0 ;; esac
+  if [ "$fail_count" -ge 1 ]; then
+    touch "$MODDIR/disable"
+    rm -f "$BOOT_PENDING_FILE" "$BOOT_FAIL_COUNT_FILE"
+    exit 0
+  fi
+  echo 1 > "$BOOT_FAIL_COUNT_FILE"
 fi
 
 if [ -n "$boot_id" ]; then
@@ -44,7 +51,6 @@ if [ -n "$boot_id" ]; then
 else
   echo "unknown" > "$BOOT_PENDING_FILE"
 fi
-rm -f "$BOOT_OK_FILE"
 
 # 清理历史启动 marker，避免 logs 目录长期累积。
 if [ -d "$LOGS_DIR" ]; then
